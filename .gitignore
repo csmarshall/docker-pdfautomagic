@@ -1,0 +1,32 @@
+# Environment variables (may contain secrets)
+.env
+
+# Rclone configuration (contains OAuth tokens and credentials)
+*.conf
+
+# Docker volumes and data
+config/
+config-*/
+!config-example/
+
+# Scan directories
+scans/
+pdfs/
+
+# Logs
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Temporary files
+*.tmp
+*.bak

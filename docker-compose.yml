@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  ocr-processor:
+    build: .
+    container_name: pdfautomagic
+    volumes:
+      # Mount the PDF directory (containing unprocessed, processed, originals)
+      - ${SCAN_DIR}:/scans
+      # Mount config directory (contains rclone.conf and post-scan-commands/)
+      - ${CONFIG_DIR}:/config:ro
+    environment:
+      - TZ=${TIMEZONE:-UTC}
+      - RCLONE_REMOTE=${RCLONE_REMOTE:-Dropbox:Cabinet/Documents}
+      - INTERVAL_MINUTES=${INTERVAL_MINUTES:-1}
+      - MAX_PARALLEL_JOBS=${MAX_PARALLEL_JOBS:-1}
+      - MINUTES_OLD=${MINUTES_OLD:-2}
+    restart: unless-stopped
