@@ -10,7 +10,7 @@ MINUTES_OLD="${MINUTES_OLD:-2}"
 MAX_PARALLEL_JOBS="${MAX_PARALLEL_JOBS:-1}"
 
 ts () {
-    echo -n "$(date +'%F-%R:%S ')${SCRIPT} - "
+    echo -n "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] ${SCRIPT} - "
     echo $*
 }
 
