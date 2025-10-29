@@ -4,6 +4,7 @@ services:
   ocr-processor:
     build: .
     container_name: pdfautomagic
+    user: "${PUID:-1000}:${PGID:-1000}"
     volumes:
       # Mount the PDF directory (containing unprocessed, processed, originals)
       - ${SCAN_DIR}:/scans

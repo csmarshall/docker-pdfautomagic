@@ -59,7 +59,7 @@ RCLONE_REMOTE=YOUR_REMOTE:PDFAutomagicTest
 INTERVAL_MINUTES=1
 MAX_PARALLEL_JOBS=1
 MINUTES_OLD=0
-TIMEZONE=America/New_York
+TIMEZONE=America/Chicago
 EOF
 
 # Edit .env with your actual paths

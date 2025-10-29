@@ -114,7 +114,7 @@ Example `.env`:
 SCAN_DIR=/home/user/pdfs
 CONFIG_DIR=/home/user/my-config
 RCLONE_REMOTE=Dropbox:Cabinet/Documents
-TIMEZONE=America/New_York
+TIMEZONE=America/Chicago
 ```
 
 **Cloud Storage Examples:**
@@ -181,6 +181,93 @@ INTERVAL_MINUTES=5  # Check every 5 minutes instead of default 1 minute
 5. Processed files are synced to your configured cloud storage via rclone
 6. All executable scripts in `/config/post-scan-commands/` are executed
    - Examples: Send notifications, update databases, trigger webhooks, log events, etc.
+
+## Example: Network Scanner to Cloud Workflow
+
+This example shows how to configure PDFAutomagic with a network scanner that uploads to a Samba/CIFS share.
+
+**Scenario**: Canon imageRUNNER or similar network scanner → SMB share → OCR → Cloud storage
+
+### 1. Create dedicated scanner user
+
+**Best practice**: Create a dedicated user whose sole purpose is to own the scan directory and SMB share. This isolates permissions and provides better security.
+
+```bash
+# Create dedicated scanner user and group
+# Using explicit UID/GID makes it easier to track ownership
+sudo groupadd -g 1003 scanner
+sudo useradd -u 1001 -g 1003 -m -s /bin/bash scanner
+
+# Create scan directory structure owned by scanner user
+sudo mkdir -p /storage/scanner/unprocessed
+sudo chown -R scanner:scanner /storage/scanner
+sudo chmod -R 775 /storage/scanner
+```
+
+**Why a dedicated user?**
+- **Security**: Limited permissions, only accesses scan directory
+- **Isolation**: Separate from your personal user account
+- **Clarity**: Easy to identify scanner-related files (`ls -l` shows "scanner")
+- **Auditing**: Can track all scanner activity to one user
+
+### 2. Configure Samba share
+
+Add to `/etc/samba/smb.conf`:
+```ini
+[scanner]
+   comment = Network Scanner Upload
+   path = /storage/scanner
+   read only = no
+   writeable = yes
+   browseable = yes
+   create mask = 0644
+   directory mask = 0755
+   valid users = scanner
+```
+
+Set Samba password for scanner user:
+```bash
+sudo smbpasswd -a scanner
+sudo systemctl restart smbd
+```
+
+### 3. Configure scanner device
+
+On your network scanner (Canon imageRUNNER, Brother, HP, etc.):
+- Add SMB destination: `\\your-server\scanner\unprocessed`
+- Username: `scanner`
+- Password: (password set above)
+- File format: PDF or TIFF (both supported)
+
+### 4. Configure PDFAutomagic
+
+Create `.env`:
+```bash
+SCAN_DIR=/storage/scanner
+CONFIG_DIR=/home/youruser/my-config
+RCLONE_REMOTE=Dropbox:Cabinet/Documents
+PUID=1001  # Match scanner user UID
+PGID=1003  # Match scanner group GID
+TIMEZONE=America/Chicago
+```
+
+Start container:
+```bash
+docker-compose up -d
+```
+
+### 5. Workflow in action
+
+1. **Scan**: Press scan button on network printer
+2. **Upload**: Scanner uploads `scan001.pdf` to `/storage/scanner/unprocessed/`
+3. **Process**: PDFAutomagic OCRs it → `ocrscan001_2025-10-29-151230.pdf`
+4. **Organize**:
+   - Processed: `/storage/scanner/processed/2025/10/29/ocrscan001_2025-10-29-151230.pdf`
+   - Original: `/storage/scanner/originals/2025/10/29/scan001.pdf`
+5. **Sync**: Uploaded to `Dropbox:Cabinet/Documents/2025/10/29/`
+6. **Access**: Searchable PDF available in cloud storage from any device
+
+**File ownership**: With `PUID=1001` and `PGID=1003`, all processed files will be owned by the scanner user, maintaining consistent permissions across the SMB share.
 
 ## Logging & Monitoring
 

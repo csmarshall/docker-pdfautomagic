@@ -81,9 +81,12 @@ fi
 # Function to process a single file
 process_file() {
     local INPUT_FILE="${1}"
-    local OUTPUT_FILE="${OUTPUT_DIR}/ocr$(basename ${INPUT_FILE} | sed -e 's/.pdf$//g')_$(date +"%F-%H%M%S").pdf"
+    local BASENAME=$(basename "${INPUT_FILE}")
+    # Strip any extension (.pdf, .tif, .tiff, etc.) - output is always PDF
+    local FILENAME="${BASENAME%.*}"
+    local OUTPUT_FILE="${OUTPUT_DIR}/ocr${FILENAME}_$(date +"%F-%H%M%S").pdf"
 
-    # Skip if not a PDF or file is empty
+    # Skip if file is empty
     if [[ ! -f "${INPUT_FILE}" ]] || [[ ! -s "${INPUT_FILE}" ]]; then
         ts "Skipping invalid or empty file: ${INPUT_FILE}"
         return 1
