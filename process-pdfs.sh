@@ -14,17 +14,22 @@ ts () {
     echo $*
 }
 
-clean_up () {
-    EXIT_CODE=${1}
+cleanup_lock () {
     if [[ -e "${LOCK_FILE}" ]] ; then
         ts "Removing lock ${LOCK_FILE}"
         rm ${LOCK_FILE}
     fi
+}
+
+clean_up () {
+    EXIT_CODE=${1:-0}
+    cleanup_lock
     ts "Done"
     exit ${EXIT_CODE}
 }
 
-trap clean_up SIGHUP SIGINT SIGTERM
+# Clean up lock file on exit, interrupt, or termination
+trap cleanup_lock EXIT SIGHUP SIGINT SIGTERM
 
 if [[ -e "${LOCK_FILE}" ]]; then
     ts "Already running under pid $(cat ${LOCK_FILE})"

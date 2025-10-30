@@ -24,6 +24,7 @@ Each ADR follows this format:
 - [ADR-003](003-parallel-processing-opt-in.md) - Default MAX_PARALLEL_JOBS=1 (opt-in for performance)
 - [ADR-004](004-environment-variables-for-hooks.md) - Export environment variables to post-scan commands
 - [ADR-005](005-user-group-id-support.md) - Support configurable user/group IDs (PUID/PGID)
+- [ADR-006](006-automated-updates-and-cicd.md) - Automated updates via CI/CD and Watchtower
 
 ## Creating a New ADR
 

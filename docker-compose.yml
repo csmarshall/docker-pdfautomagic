@@ -17,3 +17,17 @@ services:
       - MAX_PARALLEL_JOBS=${MAX_PARALLEL_JOBS:-1}
       - MINUTES_OLD=${MINUTES_OLD:-2}
     restart: unless-stopped
+
+  # Watchtower: Automatically updates Docker images
+  # Uncomment to enable automatic updates
+  # watchtower:
+  #   image: containrrr/watchtower
+  #   container_name: watchtower
+  #   restart: unless-stopped
+  #   volumes:
+  #     - /var/run/docker.sock:/var/run/docker.sock
+  #   environment:
+  #     - WATCHTOWER_CLEANUP=true
+  #     - WATCHTOWER_INCLUDE_RESTARTING=true
+  #     - WATCHTOWER_SCHEDULE=0 0 4 * * *  # Daily at 4 AM
+  #   command: pdfautomagic  # Only watch PDFAutomagic container

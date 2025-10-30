@@ -469,7 +469,7 @@ Full list: https://tesseract-ocr.github.io/tessdoc/Data-Files-in-different-versi
 
 **Specify language for OCR:**
 
-By default, Tesseract auto-detects language. To specify a language, edit `import_scanned_documents.sh` line 81:
+By default, Tesseract auto-detects language. To specify a language, edit `process-pdfs.sh` and modify the ocrmypdf command:
 ```bash
 # Single language
 /usr/bin/ocrmypdf -l fra -rdc ${INPUT_FILE} ${OUTPUT_FILE}
@@ -477,6 +477,76 @@ By default, Tesseract auto-detects language. To specify a language, edit `import
 # Multiple languages
 /usr/bin/ocrmypdf -l eng+fra+deu -rdc ${INPUT_FILE} ${OUTPUT_FILE}
 ```
+
+## Maintenance & Updates
+
+### Manual Updates
+
+Rebuild the container to get the latest package versions from Ubuntu 24.04:
+
+```bash
+# Pull latest base image and rebuild
+docker-compose build --pull --no-cache
+
+# Restart with updated container
+docker-compose down
+docker-compose up -d
+```
+
+**Check current versions:**
+```bash
+docker exec pdfautomagic ocrmypdf --version
+docker exec pdfautomagic tesseract --version
+docker exec pdfautomagic rclone version
+```
+
+**Recommended schedule:**
+- **Monthly**: Rebuild to get security patches
+- **After Ubuntu security advisories**: https://ubuntu.com/security/notices
+- **When major rclone updates release**: https://rclone.org/
+
+### Automatic Updates with Watchtower
+
+Watchtower automatically pulls new Docker images and restarts your containers. Add it to your deployment:
+
+```yaml
+# Add to your docker-compose.yml
+services:
+  # ... existing pdfautomagic service ...
+
+  watchtower:
+    image: containrrr/watchtower
+    container_name: watchtower
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - WATCHTOWER_CLEANUP=true
+      - WATCHTOWER_INCLUDE_RESTARTING=true
+      - WATCHTOWER_SCHEDULE=0 0 4 * * *  # Daily at 4 AM
+    command: pdfautomagic  # Only watch PDFAutomagic container
+```
+
+**Configuration options:**
+- `WATCHTOWER_SCHEDULE`: Cron format (default checks every 24 hours)
+- `WATCHTOWER_CLEANUP=true`: Remove old images after update
+- `WATCHTOWER_NOTIFICATIONS`: Email, Slack, Discord notifications (see [Watchtower docs](https://containrrr.dev/watchtower/notifications/))
+
+**Security note**: Watchtower needs access to Docker socket. Only use if you trust automated updates.
+
+### CI/CD Updates from Docker Hub
+
+Once this project publishes to Docker Hub, you can pull pre-built images instead of building locally:
+
+```bash
+# Pull latest image
+docker pull csmarshall/pdfautomagic:latest
+
+# Restart with updated image
+docker-compose up -d
+```
+
+Images are automatically built via GitHub Actions when new versions are tagged.
 
 ## License
 
