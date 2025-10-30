@@ -11,24 +11,70 @@ Perfect for processing PDFs from scanners, email attachments, downloads, or any 
 
 ## Quick Start
 
+### Option 1: Use Pre-built Image (Recommended)
+
+The fastest way to get started - uses pre-built multi-platform images from Docker Hub:
+
 ```bash
-# 1. Clone and setup
+# 1. Create directory structure
+mkdir -p ~/pdfautomagic/{unprocessed,config}
+cd ~/pdfautomagic
+
+# 2. Configure rclone for your cloud storage
+rclone config --config config/rclone.conf
+# Follow prompts to configure (Dropbox, Google Drive, S3, etc.)
+
+# 3. Create docker-compose.yml
+cat > docker-compose.yml << 'EOF'
+version: '3.8'
+services:
+  ocr-processor:
+    image: chasmarshall/pdfautomagic:latest
+    container_name: pdfautomagic
+    user: "1000:1000"  # Change to match your user (run: id -u)
+    volumes:
+      - ./:/scans
+      - ./config:/config:ro
+    environment:
+      - TZ=America/Chicago
+      - RCLONE_REMOTE=YourRemote:Path/To/Folder
+      - INTERVAL_MINUTES=1
+      - MAX_PARALLEL_JOBS=1
+      - MINUTES_OLD=2
+    restart: unless-stopped
+EOF
+
+# 4. Edit docker-compose.yml
+# Update RCLONE_REMOTE to match your rclone remote name
+# Update user: to match your UID:GID (run 'id' to find)
+
+# 5. Start the service
+docker-compose up -d
+
+# 6. Monitor logs
+docker-compose logs -f
+```
+
+Drop PDFs in `~/pdfautomagic/unprocessed/` and watch them get OCR'd and synced!
+
+### Option 2: Build from Source
+
+For development or customization:
+
+```bash
+# 1. Clone repository
 git clone https://github.com/csmarshall/docker-pdfautomagic.git
 cd docker-pdfautomagic
 
 # 2. Create config directory
 cp -r config-example my-config
 rclone config --config my-config/rclone.conf
-# Follow prompts to configure your cloud storage
 
 # 3. Configure environment
 cp .env.example .env
-# Edit .env with your paths:
-#   SCAN_DIR=/path/to/pdfs
-#   CONFIG_DIR=/path/to/my-config
-#   RCLONE_REMOTE=Dropbox:Cabinet/Documents
+# Edit .env with your paths and settings
 
-# 4. Create scan directory structure
+# 4. Create scan directory
 mkdir -p /path/to/pdfs/unprocessed
 
 # 5. Build and start
@@ -38,8 +84,6 @@ docker-compose up -d
 # 6. Monitor
 docker-compose logs -f
 ```
-
-Drop PDFs in `/path/to/pdfs/unprocessed/` and watch them get OCR'd and synced!
 
 ## Features
 
