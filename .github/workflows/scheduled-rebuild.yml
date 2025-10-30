@@ -36,6 +36,15 @@ jobs:
           echo "latest_tag=$LATEST_TAG" >> $GITHUB_OUTPUT
           echo "Current latest version: $LATEST_TAG"
 
+      - name: Get base image digest
+        id: base_image
+        run: |
+          # Pull ubuntu:24.04 and get its current digest
+          docker pull ubuntu:24.04
+          BASE_DIGEST=$(docker image inspect ubuntu:24.04 --format '{{index .RepoDigests 0}}' 2>/dev/null || echo "ubuntu:24.04@unknown")
+          echo "Base image: $BASE_DIGEST"
+          echo "digest=$BASE_DIGEST" >> $GITHUB_OUTPUT
+
       - name: Build test image to check versions
         run: |
           docker build -t test-build .
@@ -43,12 +52,9 @@ jobs:
       - name: Extract new build info
         id: new_info
         run: |
-          # Get the base image digest used in the build
-          BASE_DIGEST=$(docker image inspect test-build --format '{{index .Config.Image}}' 2>/dev/null || echo "unknown")
-
           # Get version info from newly built image
           NEW_VERSIONS=$(docker run --rm test-build bash -c '
-            echo "base_image_digest='$BASE_DIGEST'"
+            echo "base_image_digest=${{ steps.base_image.outputs.digest }}"
             echo "ocrmypdf=$(ocrmypdf --version)"
             echo "tesseract=$(tesseract --version 2>&1 | head -1)"
             echo "rclone=$(rclone version 2>&1 | grep rclone | head -1)"
@@ -73,11 +79,8 @@ jobs:
         run: |
           # Try to pull current latest image
           if docker pull ${{ env.DOCKER_IMAGE }}:latest 2>/dev/null; then
-            # Get the base image digest from current image
-            CURRENT_BASE_DIGEST=$(docker image inspect ${{ env.DOCKER_IMAGE }}:latest --format '{{index .Config.Image}}' 2>/dev/null || echo "unknown")
-
             CURRENT_VERSIONS=$(docker run --rm ${{ env.DOCKER_IMAGE }}:latest bash -c '
-              echo "base_image_digest='$CURRENT_BASE_DIGEST'"
+              echo "base_image_digest=${{ steps.base_image.outputs.digest }}"
               echo "ocrmypdf=$(ocrmypdf --version)"
               echo "tesseract=$(tesseract --version 2>&1 | head -1)"
               echo "rclone=$(rclone version 2>&1 | grep rclone | head -1)"
