@@ -18,7 +18,7 @@ This document explains how to set up automated Docker image builds and publishin
 5. Visibility: Public
 6. Click "Create"
 
-Your image will be available as: `csmarshall/pdfautomagic`
+Your image will be available as: `chasmarshall/pdfautomagic`
 
 ### 2. Create Docker Hub Access Token
 
@@ -37,7 +37,7 @@ Your image will be available as: `csmarshall/pdfautomagic`
 
 **Secret 1:**
 - Name: `DOCKERHUB_USERNAME`
-- Value: `csmarshall` (your Docker Hub username)
+- Value: `chasmarshall` (your Docker Hub username)
 
 **Secret 2:**
 - Name: `DOCKERHUB_TOKEN`
@@ -70,10 +70,10 @@ git push origin v1.0.0
 ```
 
 This will trigger the workflow to build and push:
-- `csmarshall/pdfautomagic:latest`
-- `csmarshall/pdfautomagic:1.0.0`
-- `csmarshall/pdfautomagic:1.0`
-- `csmarshall/pdfautomagic:1`
+- `chasmarshall/pdfautomagic:latest`
+- `chasmarshall/pdfautomagic:1.0.0`
+- `chasmarshall/pdfautomagic:1.0`
+- `chasmarshall/pdfautomagic:1`
 
 ## Workflow Details
 
@@ -91,7 +91,7 @@ Once published, users can use the pre-built image instead of building locally:
 ```yaml
 services:
   ocr-processor:
-    image: csmarshall/pdfautomagic:latest  # Use pre-built image
+    image: chasmarshall/pdfautomagic:latest  # Use pre-built image
     # build: .  # Comment out the build line
     container_name: pdfautomagic
     # ... rest of config
@@ -99,14 +99,14 @@ services:
 
 **Or pull directly:**
 ```bash
-docker pull csmarshall/pdfautomagic:latest
-docker pull csmarshall/pdfautomagic:1.0.0  # Specific version
+docker pull chasmarshall/pdfautomagic:latest
+docker pull chasmarshall/pdfautomagic:1.0.0  # Specific version
 ```
 
 ## Monitoring Builds
 
 - View build status: https://github.com/csmarshall/docker-pdfautomagic/actions
-- View published images: https://hub.docker.com/r/csmarshall/pdfautomagic
+- View published images: https://hub.docker.com/r/chasmarshall/pdfautomagic
 
 ## Troubleshooting
 

@@ -540,7 +540,7 @@ Once this project publishes to Docker Hub, you can pull pre-built images instead
 
 ```bash
 # Pull latest image
-docker pull csmarshall/pdfautomagic:latest
+docker pull chasmarshall/pdfautomagic:latest
 
 # Restart with updated image
 docker-compose up -d

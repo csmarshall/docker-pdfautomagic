@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
 
 env:
-  DOCKER_IMAGE: csmarshall/pdfautomagic
+  DOCKER_IMAGE: chasmarshall/pdfautomagic
 
 jobs:
   build:
