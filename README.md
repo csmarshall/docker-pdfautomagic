@@ -1,5 +1,10 @@
 # PDFAutomagic
 
+[![Build and Push Docker Image](https://github.com/csmarshall/docker-pdfautomagic/actions/workflows/docker-build.yml/badge.svg)](https://github.com/csmarshall/docker-pdfautomagic/actions/workflows/docker-build.yml)
+[![Scheduled Dependency Updates](https://github.com/csmarshall/docker-pdfautomagic/actions/workflows/scheduled-rebuild.yml/badge.svg)](https://github.com/csmarshall/docker-pdfautomagic/actions/workflows/scheduled-rebuild.yml)
+[![Docker Pulls](https://img.shields.io/docker/pulls/chasmarshall/pdfautomagic)](https://hub.docker.com/r/chasmarshall/pdfautomagic)
+[![Docker Image Version](https://img.shields.io/docker/v/chasmarshall/pdfautomagic?sort=semver)](https://hub.docker.com/r/chasmarshall/pdfautomagic/tags)
+
 Dockerized script that automatically OCRs PDF documents and syncs them to cloud storage (Dropbox, Google Drive, S3, etc.) organized by date.
 
 Perfect for processing PDFs from scanners, email attachments, downloads, or any other source.
