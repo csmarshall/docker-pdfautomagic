@@ -7,7 +7,8 @@ RUN apt-get update
 
 # Install base OCR tools and utilities
 # Split into smaller RUN commands for better ARM64/QEMU compatibility
-RUN apt-get install -y \
+# Use --no-install-recommends to reduce package count for QEMU
+RUN apt-get install -y --no-install-recommends \
     ocrmypdf \
     tesseract-ocr \
     ghostscript \
@@ -15,26 +16,26 @@ RUN apt-get install -y \
     pngquant
 
 # Install language packs - Group 1: Top 3 languages (English, Chinese, Spanish)
-RUN apt-get install -y \
+RUN apt-get install -y --no-install-recommends \
     tesseract-ocr-eng \
     tesseract-ocr-chi-sim \
     tesseract-ocr-spa
 
 # Install language packs - Group 2: Hindi, Arabic, French
-RUN apt-get install -y \
+RUN apt-get install -y --no-install-recommends \
     tesseract-ocr-hin \
     tesseract-ocr-ara \
     tesseract-ocr-fra
 
 # Install language packs - Group 3: Portuguese, Russian, German, Japanese
-RUN apt-get install -y \
+RUN apt-get install -y --no-install-recommends \
     tesseract-ocr-por \
     tesseract-ocr-rus \
     tesseract-ocr-deu \
     tesseract-ocr-jpn
 
 # Install remaining utilities
-RUN apt-get install -y \
+RUN apt-get install -y --no-install-recommends \
     curl \
     unzip \
     ca-certificates \
