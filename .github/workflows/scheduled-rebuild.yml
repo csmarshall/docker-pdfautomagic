@@ -52,8 +52,8 @@ jobs:
       - name: Extract new build info
         id: new_info
         run: |
-          # Get version info from newly built image
-          NEW_VERSIONS=$(docker run --rm test-build bash -c '
+          # Get version info from newly built image (override entrypoint)
+          NEW_VERSIONS=$(docker run --rm --entrypoint bash test-build -c '
             echo "base_image_digest=${{ steps.base_image.outputs.digest }}"
             echo "ocrmypdf=$(ocrmypdf --version)"
             echo "tesseract=$(tesseract --version 2>&1 | head -1)"
@@ -79,7 +79,8 @@ jobs:
         run: |
           # Try to pull current latest image
           if docker pull ${{ env.DOCKER_IMAGE }}:latest 2>/dev/null; then
-            CURRENT_VERSIONS=$(docker run --rm ${{ env.DOCKER_IMAGE }}:latest bash -c '
+            # Override entrypoint to get version info
+            CURRENT_VERSIONS=$(docker run --rm --entrypoint bash ${{ env.DOCKER_IMAGE }}:latest -c '
               echo "base_image_digest=${{ steps.base_image.outputs.digest }}"
               echo "ocrmypdf=$(ocrmypdf --version)"
               echo "tesseract=$(tesseract --version 2>&1 | head -1)"
