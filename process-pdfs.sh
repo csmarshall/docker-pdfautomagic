@@ -32,11 +32,16 @@ clean_up () {
 trap cleanup_lock EXIT SIGHUP SIGINT SIGTERM
 
 if [[ -e "${LOCK_FILE}" ]]; then
-    ts "Already running under pid $(cat ${LOCK_FILE})"
-    exit 0
-else
-    echo $$ > ${LOCK_FILE}
+    LOCK_PID=$(cat "${LOCK_FILE}" 2>/dev/null || echo "")
+    if [[ -n "${LOCK_PID}" ]] && kill -0 "${LOCK_PID}" 2>/dev/null; then
+        ts "Already running under pid ${LOCK_PID}"
+        exit 0
+    else
+        ts "Removing stale lock file (pid ${LOCK_PID} not running)"
+        rm -f "${LOCK_FILE}"
+    fi
 fi
+echo $$ > "${LOCK_FILE}"
 
 
 if [[ ! -d ${1} ]]; then
@@ -138,7 +143,11 @@ ts "All files processed"
 
 RCLONE_REMOTE="${RCLONE_REMOTE:-Dropbox:Cabinet/Documents}"
 ts "Rclone to ${RCLONE_REMOTE}"
-/usr/bin/rclone copy --config /config/rclone.conf -v ${SCAN_DIR}/processed ${RCLONE_REMOTE}
+/usr/bin/rclone copy --config /config/rclone.conf -v \
+    --exclude ".DS_Store" \
+    --exclude ".AppleDouble/**" \
+    --exclude "._*" \
+    ${SCAN_DIR}/processed ${RCLONE_REMOTE}
 
 ts "Running post-processing commands"
 POST_SCAN_DIR="/config/post-scan-commands"
