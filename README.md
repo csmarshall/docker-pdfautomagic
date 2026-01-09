@@ -13,7 +13,26 @@ Perfect for processing PDFs from scanners, email attachments, downloads, or any 
 
 ### Option 1: Use Pre-built Image (Recommended)
 
-The fastest way to get started - uses pre-built multi-platform images from Docker Hub:
+The fastest way to get started - uses pre-built multi-platform images from Docker Hub.
+
+**docker compose.yml** (pulls from Docker Hub):
+```yaml
+services:
+  ocr-processor:
+    image: chasmarshall/pdfautomagic:latest
+    container_name: pdfautomagic
+    user: "${PUID:-1000}:${PGID:-1000}"
+    volumes:
+      - ${SCAN_DIR}:/scans
+      - ${CONFIG_DIR}:/config:ro
+    environment:
+      - TZ=${TIMEZONE:-UTC}
+      - RCLONE_REMOTE=${RCLONE_REMOTE:-Dropbox:Cabinet/Documents}
+      - INTERVAL_MINUTES=${INTERVAL_MINUTES:-1}
+      - MAX_PARALLEL_JOBS=${MAX_PARALLEL_JOBS:-1}
+      - MINUTES_OLD=${MINUTES_OLD:-2}
+    restart: unless-stopped
+```
 
 ```bash
 # 1. Create directory structure
@@ -24,42 +43,63 @@ cd ~/pdfautomagic
 rclone config --config config/rclone.conf
 # Follow prompts to configure (Dropbox, Google Drive, S3, etc.)
 
-# 3. Create docker-compose.yml
-cat > docker-compose.yml << 'EOF'
-version: '3.8'
-services:
-  ocr-processor:
-    image: chasmarshall/pdfautomagic:latest
-    container_name: pdfautomagic
-    user: "1000:1000"  # Change to match your user (run: id -u)
-    volumes:
-      - ./:/scans
-      - ./config:/config:ro
-    environment:
-      - TZ=America/Chicago
-      - RCLONE_REMOTE=YourRemote:Path/To/Folder
-      - INTERVAL_MINUTES=1
-      - MAX_PARALLEL_JOBS=1
-      - MINUTES_OLD=2
-    restart: unless-stopped
+# 3. Save the docker compose.yml above, then create .env
+cat > .env << 'EOF'
+SCAN_DIR=./
+CONFIG_DIR=./config
+RCLONE_REMOTE=YourRemote:Path/To/Folder
+TIMEZONE=America/Chicago
+PUID=1000
+PGID=1000
 EOF
 
-# 4. Edit docker-compose.yml
-# Update RCLONE_REMOTE to match your rclone remote name
-# Update user: to match your UID:GID (run 'id' to find)
+# 4. Edit .env - update RCLONE_REMOTE and PUID/PGID (run 'id' to find your UID/GID)
 
 # 5. Start the service
-docker-compose up -d
+docker compose up -d
 
 # 6. Monitor logs
-docker-compose logs -f
+docker compose logs -f
 ```
 
 Drop PDFs in `~/pdfautomagic/unprocessed/` and watch them get OCR'd and synced!
 
+**Or use plain Docker** (no compose):
+```bash
+docker run -d \
+  --name pdfautomagic \
+  --restart unless-stopped \
+  --user "$(id -u):$(id -g)" \
+  -v ~/pdfautomagic:/scans \
+  -v ~/pdfautomagic/config:/config:ro \
+  -e TZ=America/Chicago \
+  -e RCLONE_REMOTE=YourRemote:Path/To/Folder \
+  -e INTERVAL_MINUTES=1 \
+  chasmarshall/pdfautomagic:latest
+```
+
 ### Option 2: Build from Source
 
-For development or customization:
+For development or customization.
+
+**docker compose.build.yml** (builds locally):
+```yaml
+services:
+  ocr-processor:
+    build: .
+    container_name: pdfautomagic
+    user: "${PUID:-1000}:${PGID:-1000}"
+    volumes:
+      - ${SCAN_DIR}:/scans
+      - ${CONFIG_DIR}:/config:ro
+    environment:
+      - TZ=${TIMEZONE:-UTC}
+      - RCLONE_REMOTE=${RCLONE_REMOTE:-Dropbox:Cabinet/Documents}
+      - INTERVAL_MINUTES=${INTERVAL_MINUTES:-1}
+      - MAX_PARALLEL_JOBS=${MAX_PARALLEL_JOBS:-1}
+      - MINUTES_OLD=${MINUTES_OLD:-2}
+    restart: unless-stopped
+```
 
 ```bash
 # 1. Clone repository
@@ -77,12 +117,12 @@ cp .env.example .env
 # 4. Create scan directory
 mkdir -p /path/to/pdfs/unprocessed
 
-# 5. Build and start
-docker-compose build
-docker-compose up -d
+# 5. Build and start (note the -f flag to use the build compose file)
+docker compose -f docker compose.build.yml build
+docker compose -f docker compose.build.yml up -d
 
 # 6. Monitor
-docker-compose logs -f
+docker compose logs -f
 ```
 
 ## Features
@@ -129,8 +169,8 @@ See `docs/adr/001-use-ubuntu-base-image.md` for the full decision record.
 
 Ensure you have these files in your directory:
 - `Dockerfile`
-- `docker-compose.yml`
-- `import_scanned_documents.sh`
+- `docker compose.yml` (pulls from Docker Hub)
+- `docker compose.build.yml` (builds from source)
 - `.env.example`
 
 ### 2. Set up configuration directory
@@ -173,10 +213,15 @@ TIMEZONE=America/Chicago
 - OneDrive: `RCLONE_REMOTE=OneDrive:Documents`
 - Local directory: `RCLONE_REMOTE=/backup/pdfs` (configure local remote in rclone.conf)
 
-### 4. Build the Docker image
+### 4. Start the service
 
 ```bash
-docker-compose build
+# Using pre-built image from Docker Hub (recommended):
+docker compose up -d
+
+# Or build from source:
+docker compose -f docker compose.build.yml build
+docker compose -f docker compose.build.yml up -d
 ```
 
 ## Usage
@@ -186,7 +231,7 @@ docker-compose build
 PDFAutomagic runs as a daemon by default, checking for new files every minute:
 
 ```bash
-docker-compose up -d
+docker compose up -d
 ```
 
 The container will:
@@ -200,7 +245,7 @@ The container will:
 
 View logs in real-time:
 ```bash
-docker-compose logs -f
+docker compose logs -f
 ```
 
 Check health status:
@@ -211,7 +256,7 @@ docker inspect pdfautomagic | grep -A 5 Health
 
 Stop the service:
 ```bash
-docker-compose down
+docker compose down
 ```
 
 **Configure check interval:**
@@ -302,7 +347,7 @@ TIMEZONE=America/Chicago
 
 Start container:
 ```bash
-docker-compose up -d
+docker compose up -d
 ```
 
 ### 5. Workflow in action
@@ -326,13 +371,13 @@ All output goes to Docker logs (stdout/stderr):
 
 ```bash
 # View recent logs
-docker-compose logs
+docker compose logs
 
 # Follow logs in real-time
-docker-compose logs -f
+docker compose logs -f
 
 # View last 100 lines
-docker-compose logs --tail=100
+docker compose logs --tail=100
 ```
 
 ### Log rotation
@@ -386,23 +431,23 @@ For external monitoring systems (Prometheus, Datadog, etc.), you can:
 ### Container won't start
 
 ```bash
-docker-compose logs ocr-processor
+docker compose logs ocr-processor
 ```
 
 ### Test rclone connection
 
 ```bash
 # List your configured remotes
-docker-compose run --rm ocr-processor rclone listremotes --config /config/rclone.conf
+docker compose run --rm ocr-processor rclone listremotes --config /config/rclone.conf
 
 # Test connection to your remote
-docker-compose run --rm ocr-processor rclone ls Dropbox: --config /config/rclone.conf
+docker compose run --rm ocr-processor rclone ls Dropbox: --config /config/rclone.conf
 ```
 
 ### Verify OCR is working
 
 ```bash
-docker-compose run --rm ocr-processor ocrmypdf --version
+docker compose run --rm ocr-processor ocrmypdf --version
 ```
 
 ## Configuration
@@ -531,15 +576,20 @@ By default, Tesseract auto-detects language. To specify a language, edit `proces
 
 ### Manual Updates
 
-Rebuild the container to get the latest package versions from Ubuntu 24.04:
-
+**If using pre-built Docker Hub image** (default `docker-compose.yml`):
 ```bash
-# Pull latest base image and rebuild
-docker-compose build --pull --no-cache
+# Pull latest image and restart
+docker pull chasmarshall/pdfautomagic:latest
+docker compose down
+docker compose up -d
+```
 
-# Restart with updated container
-docker-compose down
-docker-compose up -d
+**If building from source** (`docker-compose.build.yml`):
+```bash
+# Rebuild with latest base image
+docker compose -f docker-compose.build.yml build --pull --no-cache
+docker compose -f docker-compose.build.yml down
+docker compose -f docker-compose.build.yml up -d
 ```
 
 **Check current versions:**
@@ -583,16 +633,14 @@ services:
 
 **Security note**: Watchtower needs access to Docker socket. Only use if you trust automated updates.
 
-### CI/CD Updates from Docker Hub
+### Using Pre-built Images from Docker Hub
 
-Once this project publishes to Docker Hub, you can pull pre-built images instead of building locally:
+Pre-built multi-platform images (amd64/arm64) are available on Docker Hub and are used by the default `docker compose.yml`:
 
 ```bash
-# Pull latest image
+# Pull latest image and restart
 docker pull chasmarshall/pdfautomagic:latest
-
-# Restart with updated image
-docker-compose up -d
+docker compose up -d
 ```
 
 Images are automatically built via GitHub Actions when new versions are tagged.

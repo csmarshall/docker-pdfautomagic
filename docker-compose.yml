@@ -1,6 +1,9 @@
+# Docker Compose for PDFAutomagic - pulls pre-built image from Docker Hub
+# For building from source, use: docker compose -f docker-compose.build.yml up -d
+
 services:
   ocr-processor:
-    build: .
+    image: chasmarshall/pdfautomagic:latest
     container_name: pdfautomagic
     user: "${PUID:-1000}:${PGID:-1000}"
     volumes:

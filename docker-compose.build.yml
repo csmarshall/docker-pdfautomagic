@@ -1,0 +1,20 @@
+# Docker Compose for PDFAutomagic - builds from source
+# For pre-built Docker Hub image, use: docker compose up -d
+
+services:
+  ocr-processor:
+    build: .
+    container_name: pdfautomagic
+    user: "${PUID:-1000}:${PGID:-1000}"
+    volumes:
+      # Mount the PDF directory (containing unprocessed, processed, originals)
+      - ${SCAN_DIR}:/scans
+      # Mount config directory (contains rclone.conf and post-scan-commands/)
+      - ${CONFIG_DIR}:/config:ro
+    environment:
+      - TZ=${TIMEZONE:-UTC}
+      - RCLONE_REMOTE=${RCLONE_REMOTE:-Dropbox:Cabinet/Documents}
+      - INTERVAL_MINUTES=${INTERVAL_MINUTES:-1}
+      - MAX_PARALLEL_JOBS=${MAX_PARALLEL_JOBS:-1}
+      - MINUTES_OLD=${MINUTES_OLD:-2}
+    restart: unless-stopped
