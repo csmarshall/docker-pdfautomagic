@@ -12,6 +12,8 @@ env:
 jobs:
   check-and-rebuild:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write  # Required for git tag push and release creation
 
     steps:
       - name: Checkout code
@@ -53,19 +55,20 @@ jobs:
         id: new_info
         run: |
           # Get version info from newly built image (override entrypoint)
+          # Extract only version numbers to avoid false positives from formatting changes
           NEW_VERSIONS=$(docker run --rm --entrypoint bash test-build -c '
             echo "base_image_digest=${{ steps.base_image.outputs.digest }}"
-            echo "ocrmypdf=$(ocrmypdf --version)"
-            echo "tesseract=$(tesseract --version 2>&1 | head -1)"
-            echo "rclone=$(rclone version 2>&1 | grep rclone | head -1)"
-            echo "base_version=$(cat /etc/os-release | grep VERSION_ID)"
+            echo "ocrmypdf=$(ocrmypdf --version 2>&1 | grep -oE "[0-9]+\.[0-9]+\.[0-9]+" | head -1)"
+            echo "tesseract=$(tesseract --version 2>&1 | grep -oE "[0-9]+\.[0-9]+\.[0-9]+" | head -1)"
+            echo "rclone=$(rclone version 2>&1 | grep -oE "v[0-9]+\.[0-9]+\.[0-9]+" | head -1)"
+            echo "base_version=$(cat /etc/os-release | grep VERSION_ID | grep -oE "[0-9]+\.[0-9]+")"
           ')
 
           echo "New versions:"
           echo "$NEW_VERSIONS"
 
-          # Save to file for comparison
-          echo "$NEW_VERSIONS" > new_versions.txt
+          # Save to file for comparison (sorted for consistent ordering)
+          echo "$NEW_VERSIONS" | sort > new_versions.txt
 
           # Add to summary
           echo "### 📦 New Build Information" >> $GITHUB_STEP_SUMMARY
@@ -80,17 +83,18 @@ jobs:
           # Try to pull current latest image
           if docker pull ${{ env.DOCKER_IMAGE }}:latest 2>/dev/null; then
             # Override entrypoint to get version info
+            # Use same extraction pattern as new build for consistent comparison
             CURRENT_VERSIONS=$(docker run --rm --entrypoint bash ${{ env.DOCKER_IMAGE }}:latest -c '
               echo "base_image_digest=${{ steps.base_image.outputs.digest }}"
-              echo "ocrmypdf=$(ocrmypdf --version)"
-              echo "tesseract=$(tesseract --version 2>&1 | head -1)"
-              echo "rclone=$(rclone version 2>&1 | grep rclone | head -1)"
-              echo "base_version=$(cat /etc/os-release | grep VERSION_ID)"
+              echo "ocrmypdf=$(ocrmypdf --version 2>&1 | grep -oE "[0-9]+\.[0-9]+\.[0-9]+" | head -1)"
+              echo "tesseract=$(tesseract --version 2>&1 | grep -oE "[0-9]+\.[0-9]+\.[0-9]+" | head -1)"
+              echo "rclone=$(rclone version 2>&1 | grep -oE "v[0-9]+\.[0-9]+\.[0-9]+" | head -1)"
+              echo "base_version=$(cat /etc/os-release | grep VERSION_ID | grep -oE "[0-9]+\.[0-9]+")"
             ')
 
             echo "Current published versions:"
             echo "$CURRENT_VERSIONS"
-            echo "$CURRENT_VERSIONS" > current_versions.txt
+            echo "$CURRENT_VERSIONS" | sort > current_versions.txt
 
             # Add to summary
             echo "### 📋 Current Published Version" >> $GITHUB_STEP_SUMMARY
