@@ -138,13 +138,20 @@ RUN ARCH=$(dpkg --print-architecture) && \
 # Pre-download the vision AI model (~5GB) so it's baked into the image
 # This creates a ~5GB layer that's cached separately from the rest of the image
 # Model is stored in /usr/share/ollama so it's readable by non-root users at runtime
+# NOTE: Skip model download on ARM64 - QEMU emulation is too slow/unreliable
+#       ARM64 users will auto-download the model on first use
 ARG VISION_MODEL=qwen2.5vl:7b
 ENV OLLAMA_MODELS=/usr/share/ollama/models
 RUN mkdir -p /usr/share/ollama/models && \
-    ollama serve & \
-    sleep 5 && \
-    ollama pull ${VISION_MODEL} && \
-    pkill ollama && \
+    ARCH=$(dpkg --print-architecture) && \
+    if [ "$ARCH" = "amd64" ]; then \
+        ollama serve & \
+        sleep 5 && \
+        ollama pull ${VISION_MODEL} && \
+        pkill ollama; \
+    else \
+        echo "Skipping model download on $ARCH - will auto-download on first use"; \
+    fi && \
     chmod -R a+rX /usr/share/ollama
 
 # Copy detection module
