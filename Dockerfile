@@ -127,7 +127,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Install Ollama (pinned version for reproducibility)
 # Ollama manages GPU detection automatically (NVIDIA, AMD, Apple Silicon)
-RUN curl -fsSL https://github.com/ollama/ollama/releases/download/v${OLLAMA_VERSION}/ollama-linux-amd64.tgz \
+# Download architecture-specific binary (amd64 or arm64)
+RUN ARCH=$(dpkg --print-architecture) && \
+    curl -fsSL https://github.com/ollama/ollama/releases/download/v${OLLAMA_VERSION}/ollama-linux-${ARCH}.tgz \
     -o /tmp/ollama.tgz \
     && tar -xzf /tmp/ollama.tgz -C /usr \
     && rm /tmp/ollama.tgz \
