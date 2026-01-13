@@ -1,8 +1,18 @@
 # Docker Compose for PDFAutomagic - pulls pre-built image from Docker Hub
-# For building from source, use: docker compose -f docker-compose.build.yml up -d
+#
+# This uses the full-featured image with AI detection support.
+# The vision AI model is included - no additional setup required.
+#
+# For the lite OCR-only image, use: chasmarshall/pdfautomagic:latest-lite
+#
+# Usage:
+#   docker compose up -d
+#
+# For building from source instead:
+#   docker compose -f docker-compose.build.yml up -d
 
 services:
-  ocr-processor:
+  pdfautomagic:
     image: chasmarshall/pdfautomagic:latest
     container_name: pdfautomagic
     user: "${PUID:-1000}:${PGID:-1000}"
@@ -16,8 +26,20 @@ services:
       - RCLONE_REMOTE=${RCLONE_REMOTE:-Dropbox:Cabinet/Documents}
       - INTERVAL_MINUTES=${INTERVAL_MINUTES:-1}
       - MAX_PARALLEL_JOBS=${MAX_PARALLEL_JOBS:-1}
-      - MINUTES_OLD=${MINUTES_OLD:-2}
+      - MINUTES_OLD=${MINUTES_OLD:-1}
+      # AI Detection (enabled by default in full image)
+      - ENABLE_DETECTION=${ENABLE_DETECTION:-true}
+      - ENABLE_CLASSIFICATION=${ENABLE_CLASSIFICATION:-true}
+      - ALLOW_CPU_FALLBACK=${ALLOW_CPU_FALLBACK:-false}
     restart: unless-stopped
+    # GPU configuration for NVIDIA (remove if using CPU fallback)
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
 
   # Watchtower: Automatically updates Docker images
   # Uncomment to enable automatic updates

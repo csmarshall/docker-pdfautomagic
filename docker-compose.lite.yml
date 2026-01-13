@@ -1,0 +1,33 @@
+# Docker Compose for PDFAutomagic Lite - OCR only, no AI features
+#
+# This uses the lightweight lite image (~800MB vs ~7GB for full).
+# Use this if you:
+# - Don't need AI-powered document detection
+# - Want a smaller image
+# - Don't have a GPU
+#
+# Usage:
+#   docker compose -f docker-compose.lite.yml up -d
+#
+# For the full-featured image with AI detection:
+#   docker compose up -d
+
+services:
+  pdfautomagic:
+    image: chasmarshall/pdfautomagic:latest-lite
+    container_name: pdfautomagic
+    user: "${PUID:-1000}:${PGID:-1000}"
+    volumes:
+      # Mount the PDF directory (containing unprocessed, processed, originals)
+      - ${SCAN_DIR}:/scans
+      # Mount config directory (contains rclone.conf and post-scan-commands/)
+      - ${CONFIG_DIR}:/config:ro
+    environment:
+      - TZ=${TIMEZONE:-UTC}
+      - RCLONE_REMOTE=${RCLONE_REMOTE:-Dropbox:Cabinet/Documents}
+      - INTERVAL_MINUTES=${INTERVAL_MINUTES:-1}
+      - MAX_PARALLEL_JOBS=${MAX_PARALLEL_JOBS:-1}
+      - MINUTES_OLD=${MINUTES_OLD:-1}
+      # Detection disabled - lite image is OCR only
+      - ENABLE_DETECTION=false
+    restart: unless-stopped

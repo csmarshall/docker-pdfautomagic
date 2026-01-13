@@ -32,10 +32,23 @@ Export comprehensive environment variables to all post-scan command scripts:
 - `$SCAN_DIR` - Base scan directory
 
 **Timestamp variables:**
+- `$TZ` - Container timezone (e.g., America/Chicago)
 - `$PROCESSING_DATE` - Date in YYYY/MM/DD format (for directory structure)
 - `$DATE` - ISO date: YYYY-MM-DD
 - `$TIME` - ISO time: HH:MM:SS
-- `$DATETIME` - Full ISO8601 with timezone: 2025-10-29T14:30:45-0500
+- `$DATETIME` - Full ISO8601 with timezone offset: 2025-10-29T14:30:45-0500
+
+**Detection variables (when ENABLE_DETECTION=true):**
+- `$DETECTION_ENABLED` - Whether detection was active ("true"/"false")
+- `$PAGES_SCANNED` - Total pages in all input PDFs (integer)
+- `$BLANK_PAGES_REMOVED` - Number of blank pages detected and removed (integer)
+- `$DOCUMENTS_CREATED` - Number of output documents after detection (integer)
+- `$CLASSIFICATION_ENABLED` - Whether document classification was active ("true"/"false")
+
+**Timing variables:**
+- `$PROCESSING_DURATION_SECONDS` - Total processing time in seconds (integer)
+- `$PROCESSING_DURATION` - Human-readable duration (e.g., "2m 34s")
+- `$SECONDS_PER_PAGE` - Average processing time per page (decimal)
 
 ## Consequences
 
@@ -74,6 +87,17 @@ curl -X POST https://api.example.com/notify \
 ```bash
 psql -c "INSERT INTO processing_log (date, files, destination)
          VALUES ('${DATETIME}', ${FILES_PROCESSED}, '${RCLONE_REMOTE}')"
+```
+
+**Detection-aware notification:**
+```bash
+if [[ "${DETECTION_ENABLED}" == "true" ]]; then
+  MSG="${FILES_PROCESSED} scans -> ${DOCUMENTS_CREATED} documents"
+  MSG="${MSG} (${BLANK_PAGES_REMOVED} blanks removed)"
+else
+  MSG="${FILES_PROCESSED} files processed"
+fi
+curl -X POST "https://ntfy.sh/mytopic" -d "${MSG}"
 ```
 
 ## Variable Naming Conventions

@@ -1,9 +1,23 @@
 # Docker Compose for PDFAutomagic - builds from source
-# For pre-built Docker Hub image, use: docker compose up -d
+#
+# This builds the full-featured image with AI detection support.
+# The vision AI model is included in the build - no additional setup required.
+#
+# For the lite OCR-only image, add: --target lite
+#
+# Usage:
+#   docker compose -f docker-compose.build.yml build
+#   docker compose -f docker-compose.build.yml up -d
+#
+# For pre-built Docker Hub image instead:
+#   docker compose up -d
 
 services:
-  ocr-processor:
-    build: .
+  pdfautomagic:
+    build:
+      context: .
+      # Default builds full-featured image; for lite: target: lite
+    image: pdfautomagic:latest
     container_name: pdfautomagic
     user: "${PUID:-1000}:${PGID:-1000}"
     volumes:
@@ -16,5 +30,17 @@ services:
       - RCLONE_REMOTE=${RCLONE_REMOTE:-Dropbox:Cabinet/Documents}
       - INTERVAL_MINUTES=${INTERVAL_MINUTES:-1}
       - MAX_PARALLEL_JOBS=${MAX_PARALLEL_JOBS:-1}
-      - MINUTES_OLD=${MINUTES_OLD:-2}
+      - MINUTES_OLD=${MINUTES_OLD:-1}
+      # AI Detection (enabled by default in full image)
+      - ENABLE_DETECTION=${ENABLE_DETECTION:-true}
+      - ENABLE_CLASSIFICATION=${ENABLE_CLASSIFICATION:-true}
+      - ALLOW_CPU_FALLBACK=${ALLOW_CPU_FALLBACK:-false}
     restart: unless-stopped
+    # GPU configuration for NVIDIA (remove if using CPU fallback)
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]

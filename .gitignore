@@ -30,3 +30,18 @@ Thumbs.db
 # Temporary files
 *.tmp
 *.bak
+
+# Python virtual environments
+.venv/
+__pycache__/
+*.pyc
+
+# Splitting test outputs
+splitting/test/output/
+splitting/test/input/*.pdf
+
+# Detection test outputs
+detection/test/output/
+detection/test/input/*.pdf
+detection/test_output/
+detection/*.pdf

@@ -1,0 +1,46 @@
+# Dependabot configuration for automated dependency updates
+# https://docs.github.com/en/code-security/dependabot/dependabot-version-updates
+
+version: 2
+updates:
+  # Python dependencies (detection/requirements.txt)
+  - package-ecosystem: "pip"
+    directory: "/detection"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "deps(python)"
+    labels:
+      - "dependencies"
+      - "python"
+
+  # GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "deps(actions)"
+    labels:
+      - "dependencies"
+      - "github-actions"
+
+  # Docker base images
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "deps(docker)"
+    labels:
+      - "dependencies"
+      - "docker"
+
+# NOTE: Ollama version is pinned in Dockerfile as OLLAMA_VERSION build arg.
+# Dependabot doesn't track build args, so manual updates are needed.
+# Check for new releases: https://github.com/ollama/ollama/releases
+#
+# To update Ollama:
+# 1. Check latest version at https://github.com/ollama/ollama/releases
+# 2. Update OLLAMA_VERSION in Dockerfile
+# 3. Rebuild the detection image

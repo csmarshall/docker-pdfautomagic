@@ -18,6 +18,7 @@ Each ADR follows this format:
 
 ## List of ADRs
 
+### Core Architecture
 - [ADR-000](000-project-structure-and-tooling.md) - Project structure, naming, and tooling decisions (READ THIS FIRST)
 - [ADR-001](001-use-ubuntu-base-image.md) - Use Ubuntu instead of Alpine for base image
 - [ADR-002](002-daemon-mode-only.md) - Daemon-only mode (removed external scheduling)
@@ -25,6 +26,15 @@ Each ADR follows this format:
 - [ADR-004](004-environment-variables-for-hooks.md) - Export environment variables to post-scan commands
 - [ADR-005](005-user-group-id-support.md) - Support configurable user/group IDs (PUID/PGID)
 - [ADR-006](006-automated-updates-and-cicd.md) - Automated updates via CI/CD and Watchtower
+
+### AI-Powered Document Detection
+- [ADR-007](007-vision-ai-pdf-detection.md) - Vision AI for intelligent document detection
+- [ADR-008](008-ollama-local-model-hosting.md) - Ollama for local vision model hosting (privacy-first)
+- [ADR-009](009-multi-stage-docker-detection-variants.md) - Multi-stage Docker builds with image variants
+- [ADR-010](010-model-bundling-strategy.md) - Vision model bundling strategy (just works)
+
+### OCR Processing
+- [ADR-011](011-force-ocr-over-existing.md) - Force OCR over existing text (consistent quality)
 
 ## Creating a New ADR
 

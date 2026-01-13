@@ -1,0 +1,94 @@
+# Check for new Ollama releases and create PR if update available
+#
+# Runs on: push to main, weekly schedule, and manual trigger.
+# Creates a PR to update OLLAMA_VERSION in Dockerfile if a new version is found.
+
+name: Check Ollama Version
+
+on:
+  schedule:
+    # Run every Monday at 9 AM UTC
+    - cron: '0 9 * * 1'
+  push:
+    branches: [main]
+  workflow_dispatch:  # Allow manual trigger
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  check-version:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Get current Ollama version from Dockerfile
+        id: current
+        run: |
+          CURRENT_VERSION=$(grep -oP 'ARG OLLAMA_VERSION=\K[0-9.]+' Dockerfile)
+          echo "version=${CURRENT_VERSION}" >> $GITHUB_OUTPUT
+          echo "Current version: ${CURRENT_VERSION}"
+
+      - name: Get latest Ollama release
+        id: latest
+        run: |
+          LATEST_VERSION=$(curl -s https://api.github.com/repos/ollama/ollama/releases/latest | jq -r '.tag_name' | sed 's/^v//')
+          echo "version=${LATEST_VERSION}" >> $GITHUB_OUTPUT
+          echo "Latest version: ${LATEST_VERSION}"
+
+      - name: Compare versions
+        id: compare
+        run: |
+          if [ "${{ steps.current.outputs.version }}" != "${{ steps.latest.outputs.version }}" ]; then
+            echo "update_needed=true" >> $GITHUB_OUTPUT
+            echo "Update needed: ${{ steps.current.outputs.version }} -> ${{ steps.latest.outputs.version }}"
+          else
+            echo "update_needed=false" >> $GITHUB_OUTPUT
+            echo "Already up to date"
+          fi
+
+      - name: Update Dockerfile
+        if: steps.compare.outputs.update_needed == 'true'
+        run: |
+          sed -i "s/ARG OLLAMA_VERSION=${{ steps.current.outputs.version }}/ARG OLLAMA_VERSION=${{ steps.latest.outputs.version }}/" Dockerfile
+          echo "Updated Dockerfile"
+
+      - name: Update VERSIONS.md
+        if: steps.compare.outputs.update_needed == 'true'
+        run: |
+          # Update the current version in the table
+          sed -i "s/| ${{ steps.current.outputs.version }} |/| ${{ steps.latest.outputs.version }} |/" VERSIONS.md
+
+          # Add entry to version history
+          DATE=$(date +%Y-%m-%d)
+          sed -i "/^| Date /a | ${DATE} | Ollama | ${{ steps.current.outputs.version }} | ${{ steps.latest.outputs.version }} | Automated update |" VERSIONS.md
+          echo "Updated VERSIONS.md"
+
+      - name: Create Pull Request
+        if: steps.compare.outputs.update_needed == 'true'
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "deps(ollama): update to v${{ steps.latest.outputs.version }}"
+          title: "deps(ollama): update Ollama to v${{ steps.latest.outputs.version }}"
+          body: |
+            ## Automated Ollama Update
+
+            Updates Ollama from `v${{ steps.current.outputs.version }}` to `v${{ steps.latest.outputs.version }}`.
+
+            **Release notes:** https://github.com/ollama/ollama/releases/tag/v${{ steps.latest.outputs.version }}
+
+            ### Testing
+            - [ ] Build the image: `docker build -t pdfautomagic:test .`
+            - [ ] Test splitting functionality
+            - [ ] Verify Ollama version: `docker run --rm pdfautomagic:test ollama --version`
+
+            ---
+            *This PR was automatically created by the [check-ollama-version](.github/workflows/check-ollama-version.yml) workflow.*
+          branch: deps/ollama-${{ steps.latest.outputs.version }}
+          labels: |
+            dependencies
+            ollama
+          delete-branch: true

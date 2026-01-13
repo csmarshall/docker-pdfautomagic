@@ -6,12 +6,170 @@ SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 SCAN_DIR="${1}"
 RAW_SCAN_DIR="${1}/unprocessed"
 LOCK_FILE="/tmp/${SCRIPT}.lock"
-MINUTES_OLD="${MINUTES_OLD:-2}"
+MINUTES_OLD="${MINUTES_OLD:-1}"
 MAX_PARALLEL_JOBS="${MAX_PARALLEL_JOBS:-1}"
 
+# OCR configuration
+ROTATE_PAGES_THRESHOLD="${ROTATE_PAGES_THRESHOLD:-7.5}"  # Confidence threshold for auto-rotation (0-15+)
+
+# Detection configuration (enabled by default in full image)
+ENABLE_DETECTION="${ENABLE_DETECTION:-true}"
+ENABLE_CLASSIFICATION="${ENABLE_CLASSIFICATION:-true}"
+DETECTION_SCRIPT="${SCRIPT_DIR}/detection/split_pdf.py"
+DETECTION_VENV="${SCRIPT_DIR}/detection/.venv"
+USING_CPU_FALLBACK="false"  # Set to true if no GPU detected
+
+# Ollama configuration (runs as process in same container)
+OLLAMA_HOST="${OLLAMA_HOST:-http://localhost:11434}"
+OLLAMA_MODELS="${OLLAMA_MODELS:-/usr/share/ollama/models}"  # Where models are baked in
+OLLAMA_STARTED_BY_US="false"
+
+# Detection metrics (for post-processing hooks)
+TOTAL_PAGES_SCANNED=0
+TOTAL_BLANKS_REMOVED=0
+TOTAL_DOCS_CREATED=0
+
 ts () {
-    echo -n "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] ${SCRIPT} - "
-    echo $*
+    echo -n "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] ${SCRIPT} - " >&2
+    echo $* >&2
+}
+
+# Start Ollama process on-demand (runs in same container)
+# Returns 0 if Ollama is ready, 1 if failed to start
+start_ollama() {
+    # Check if ollama binary is available
+    if ! command -v ollama &>/dev/null; then
+        ts "WARNING: Ollama not installed, detection will not work"
+        return 1
+    fi
+
+    # Check if already running
+    if pgrep -x "ollama" >/dev/null 2>&1; then
+        ts "Ollama process already running"
+        return 0
+    fi
+
+    ts "Starting Ollama process..."
+
+    # Create writable home directory for Ollama runtime state (keys, etc)
+    # Ollama uses $HOME/.ollama for config, so we set HOME to /tmp
+    mkdir -p /tmp/.ollama
+
+    # Start ollama serve in background
+    # OLLAMA_KEEP_ALIVE=0 means model unloads immediately after each request
+    # OLLAMA_MODELS points to baked-in models, HOME=/tmp for writable config dir
+    export OLLAMA_MODELS HOME=/tmp
+    OLLAMA_KEEP_ALIVE=0 ollama serve >/dev/null 2>&1 &
+    OLLAMA_STARTED_BY_US="true"
+
+    # Wait for Ollama API to be ready (max 30 seconds)
+    ts "Waiting for Ollama API..."
+    local WAIT_COUNT=0
+    local MAX_WAIT=30
+    while [[ ${WAIT_COUNT} -lt ${MAX_WAIT} ]]; do
+        if curl -s "${OLLAMA_HOST}/api/tags" >/dev/null 2>&1; then
+            ts "Ollama API ready"
+            return 0
+        fi
+        sleep 1
+        WAIT_COUNT=$((WAIT_COUNT + 1))
+    done
+
+    ts "ERROR: Ollama API did not become ready within ${MAX_WAIT} seconds"
+    return 1
+}
+
+# Stop Ollama process (only if we started it)
+stop_ollama() {
+    if [[ "${OLLAMA_STARTED_BY_US}" != "true" ]]; then
+        # We didn't start it, don't stop it
+        return 0
+    fi
+
+    ts "Stopping Ollama process..."
+    pkill -x "ollama" 2>/dev/null || true
+    OLLAMA_STARTED_BY_US="false"
+}
+
+# Check if detection is available and configured
+check_detection_available() {
+    if [[ "${ENABLE_DETECTION}" != "true" ]]; then
+        return 1
+    fi
+
+    if [[ ! -f "${DETECTION_SCRIPT}" ]]; then
+        ts "WARNING: Detection enabled but script not found: ${DETECTION_SCRIPT}"
+        return 1
+    fi
+
+    if [[ ! -d "${DETECTION_VENV}" ]]; then
+        ts "WARNING: Detection enabled but venv not found: ${DETECTION_VENV}"
+        return 1
+    fi
+
+    # Check GPU availability, fall back to CPU with warning
+    if ! "${DETECTION_VENV}/bin/python" "${DETECTION_SCRIPT}" --check-gpu >/dev/null 2>&1; then
+        ts "========================================================================"
+        ts "WARNING: No GPU detected - AI detection will use CPU (VERY SLOW ~10x)"
+        ts "========================================================================"
+        ts ""
+        ts "Options to resolve this:"
+        ts "  1. Install GPU drivers (NVIDIA: nvidia-container-toolkit, AMD: ROCm)"
+        ts "  2. Use the lite image for basic OCR without AI detection:"
+        ts "     docker compose -f docker-compose.lite.yml up -d"
+        ts "  3. Set ENABLE_DETECTION=false to disable detection"
+        ts ""
+        ts "Continuing with CPU processing..."
+        ts "========================================================================"
+        USING_CPU_FALLBACK="true"
+    fi
+
+    return 0
+}
+
+# Detect and split a PDF into multiple documents
+# Returns: path to directory containing split PDFs, or empty if detection failed/skipped
+detect_and_split_pdf() {
+    local INPUT_FILE="${1}"
+    local SPLIT_OUTPUT_DIR=$(mktemp -d)
+
+    local CLASSIFY_FLAG=""
+    if [[ "${ENABLE_CLASSIFICATION}" == "true" ]]; then
+        CLASSIFY_FLAG="--classify"
+    fi
+
+    ts "Detecting documents in ${INPUT_FILE}..."
+
+    # Run detection and capture JSON output (stdout only, stderr goes to logs)
+    local SPLIT_RESULT
+    if SPLIT_RESULT=$("${DETECTION_VENV}/bin/python" "${DETECTION_SCRIPT}" \
+        "${INPUT_FILE}" \
+        --output-dir "${SPLIT_OUTPUT_DIR}" \
+        ${CLASSIFY_FLAG} \
+        --allow-cpu \
+        --json); then
+
+        # Parse metrics from JSON
+        local PAGES_IN=$(echo "${SPLIT_RESULT}" | python3 -c "import sys,json; print(json.load(sys.stdin).get('pages_input', 0))" 2>/dev/null || echo "0")
+        local BLANKS=$(echo "${SPLIT_RESULT}" | python3 -c "import sys,json; print(json.load(sys.stdin).get('pages_blank_removed', 0))" 2>/dev/null || echo "0")
+        local DOCS=$(echo "${SPLIT_RESULT}" | python3 -c "import sys,json; print(json.load(sys.stdin).get('documents_output', 0))" 2>/dev/null || echo "0")
+
+        # Update global metrics
+        TOTAL_PAGES_SCANNED=$((TOTAL_PAGES_SCANNED + PAGES_IN))
+        TOTAL_BLANKS_REMOVED=$((TOTAL_BLANKS_REMOVED + BLANKS))
+        TOTAL_DOCS_CREATED=$((TOTAL_DOCS_CREATED + DOCS))
+
+        ts "Detection complete: ${PAGES_IN} pages -> ${DOCS} documents (${BLANKS} blanks removed)"
+
+        echo "${SPLIT_OUTPUT_DIR}"
+        return 0
+    else
+        ts "ERROR: Detection failed for ${INPUT_FILE}"
+        ts "Detection output: ${SPLIT_RESULT}"
+        rm -rf "${SPLIT_OUTPUT_DIR}"
+        echo ""
+        return 1
+    fi
 }
 
 cleanup_lock () {
@@ -23,6 +181,7 @@ cleanup_lock () {
 
 clean_up () {
     EXIT_CODE=${1:-0}
+    stop_ollama  # Stop Ollama if we started it on-demand
     cleanup_lock
     ts "Done"
     exit ${EXIT_CODE}
@@ -59,6 +218,7 @@ NUM_FILES_TO_SCAN=$(echo ${FILES_TO_SCAN} | wc -w)
 
 if [[ "${NUM_FILES_TO_SCAN}" > "0" ]]; then
     ts "Found ${NUM_FILES_TO_SCAN} to scan in ${RAW_SCAN_DIR}"
+    PROCESSING_START_TIME=$(date +%s)
 else
     ts "No files found in ${RAW_SCAN_DIR}, exiting"
     clean_up 0
@@ -82,19 +242,41 @@ ORIGINALS_DIR="${SCAN_DIR}/originals/${DATE}"
 ts "Validating ${OUTPUT_DIR}"
 if [ ! -d ${OUTPUT_DIR} ] || [ ! -d ${ORIGINALS_DIR} ] ; then
     ts "Missing ${OUTPUT_DIR}, creating it..."
-    mkdir -vp ${OUTPUT_DIR}
-    mkdir -vp ${ORIGINALS_DIR}
+    mkdir -p ${OUTPUT_DIR}
+    mkdir -p ${ORIGINALS_DIR}
 else
     ts "Output Directory: ${OUTPUT_DIR} present"
 fi
 
-# Function to process a single file
+# Function to OCR a single file (internal - use process_file instead)
+ocr_file() {
+    local INPUT_FILE="${1}"
+    local OUTPUT_FILE="${2}"
+
+    # Warn if overwriting existing file
+    if [[ -f "${OUTPUT_FILE}" ]]; then
+        ts "WARNING: Overwriting existing file: $(basename ${OUTPUT_FILE})"
+    fi
+
+    ts "OCR: ${INPUT_FILE} -> ${OUTPUT_FILE}"
+
+    if /usr/bin/ocrmypdf --force-ocr --deskew --clean --rotate-pages --rotate-pages-threshold ${ROTATE_PAGES_THRESHOLD} "${INPUT_FILE}" "${OUTPUT_FILE}" 2>&1 | while IFS= read -r line; do
+        [[ -n "$line" ]] && echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] ocrmypdf -   $line" || true
+    done; then
+        ts "OCR successful for $(basename ${INPUT_FILE})"
+        return 0
+    else
+        ts "ERROR: OCR failed for ${INPUT_FILE}"
+        [[ -f "${OUTPUT_FILE}" ]] && rm -f "${OUTPUT_FILE}"
+        return 1
+    fi
+}
+
+# Function to process a single file (with optional detection)
 process_file() {
     local INPUT_FILE="${1}"
     local BASENAME=$(basename "${INPUT_FILE}")
-    # Strip any extension (.pdf, .tif, .tiff, etc.) - output is always PDF
     local FILENAME="${BASENAME%.*}"
-    local OUTPUT_FILE="${OUTPUT_DIR}/ocr${FILENAME}_$(date +"%F-%H%M%S").pdf"
 
     # Skip if file is empty
     if [[ ! -f "${INPUT_FILE}" ]] || [[ ! -s "${INPUT_FILE}" ]]; then
@@ -102,28 +284,98 @@ process_file() {
         return 1
     fi
 
-    ts "Processing ${INPUT_FILE} to ${OUTPUT_FILE}"
+    ts "Processing ${INPUT_FILE}"
 
-    # Run OCR with error handling
-    if /usr/bin/ocrmypdf -rdc "${INPUT_FILE}" "${OUTPUT_FILE}" 2>&1 | sed "s/^/  /"; then
-        ts "OCR successful for $(basename ${INPUT_FILE})"
+    # Check if detection is enabled and available
+    if [[ "${DETECTION_AVAILABLE}" == "true" ]]; then
+        # Detect and split the PDF first
+        local SPLIT_DIR
+        SPLIT_DIR=$(detect_and_split_pdf "${INPUT_FILE}")
+
+        if [[ -n "${SPLIT_DIR}" ]] && [[ -d "${SPLIT_DIR}" ]]; then
+            # Process each split document
+            local SPLIT_SUCCESS=true
+            for SPLIT_FILE in "${SPLIT_DIR}"/*.pdf; do
+                if [[ -f "${SPLIT_FILE}" ]]; then
+                    local SPLIT_BASENAME=$(basename "${SPLIT_FILE}")
+                    local SPLIT_FILENAME="${SPLIT_BASENAME%.*}"
+                    local OUTPUT_FILE="${OUTPUT_DIR}/${SPLIT_FILENAME}.pdf"
+
+                    if ! ocr_file "${SPLIT_FILE}" "${OUTPUT_FILE}"; then
+                        SPLIT_SUCCESS=false
+                    fi
+                fi
+            done
+
+            # Clean up temp split directory
+            rm -rf "${SPLIT_DIR}"
+
+            if [[ "${SPLIT_SUCCESS}" == "true" ]]; then
+                ts "Moving original ${INPUT_FILE} to ${ORIGINALS_DIR}"
+                mv "${INPUT_FILE}" "${ORIGINALS_DIR}"
+                return 0
+            else
+                ts "ERROR: Some split documents failed OCR for ${INPUT_FILE}"
+                return 1
+            fi
+        else
+            ts "WARNING: Detection failed, falling back to standard OCR"
+            # Fall through to standard processing
+        fi
+    fi
+
+    # Standard processing (no detection or detection failed)
+    local OUTPUT_FILE="${OUTPUT_DIR}/ocr${FILENAME}_$(date +"%F-%H%M%S").pdf"
+
+    if ocr_file "${INPUT_FILE}" "${OUTPUT_FILE}"; then
         ts "Moving ${INPUT_FILE} to ${ORIGINALS_DIR}"
-        mv -v "${INPUT_FILE}" "${ORIGINALS_DIR}"
+        mv "${INPUT_FILE}" "${ORIGINALS_DIR}"
         return 0
     else
         ts "ERROR: OCR failed for ${INPUT_FILE}, leaving in place for retry"
-        # Remove partial output file if it exists
-        [[ -f "${OUTPUT_FILE}" ]] && rm -f "${OUTPUT_FILE}"
         return 1
     fi
 }
 
+# Start Ollama on-demand if detection is enabled and files were found
+if [[ "${ENABLE_DETECTION}" == "true" ]] && [[ "${NUM_FILES_TO_SCAN}" -gt 0 ]]; then
+    if ! start_ollama; then
+        ts "WARNING: Could not start Ollama, detection will be disabled"
+    fi
+fi
+
+# Check if detection is available at startup
+DETECTION_AVAILABLE="false"
+if check_detection_available; then
+    ts "Document detection: ENABLED"
+    if [[ "${ENABLE_CLASSIFICATION}" == "true" ]]; then
+        ts "Document classification: ENABLED"
+    fi
+    DETECTION_AVAILABLE="true"
+else
+    if [[ "${ENABLE_DETECTION}" == "true" ]]; then
+        ts "Document detection: DISABLED (not available - check warnings above)"
+    else
+        ts "Document detection: DISABLED (not enabled)"
+    fi
+fi
+
 # Export function and variables for use in subshells
 export -f process_file
+export -f ocr_file
 export -f ts
-export OUTPUT_DIR ORIGINALS_DIR SCRIPT
+export -f detect_and_split_pdf
+export -f start_ollama
+export -f stop_ollama
+export OUTPUT_DIR ORIGINALS_DIR SCRIPT DETECTION_AVAILABLE
+export ENABLE_CLASSIFICATION DETECTION_SCRIPT DETECTION_VENV USING_CPU_FALLBACK
+export TOTAL_PAGES_SCANNED TOTAL_BLANKS_REMOVED TOTAL_DOCS_CREATED
+export OLLAMA_HOST OLLAMA_MODELS OLLAMA_STARTED_BY_US
 
 ts "Processing with MAX_PARALLEL_JOBS=${MAX_PARALLEL_JOBS}"
+
+# Track PIDs of processing jobs (not Ollama)
+PROCESS_PIDS=()
 
 # Process files in parallel
 for INPUT_FILE in ${FILES_TO_SCAN}; do
@@ -132,12 +384,20 @@ for INPUT_FILE in ${FILES_TO_SCAN}; do
         sleep 0.1
     done
 
-    # Start processing in background
+    # Start processing in background and capture PID
     process_file "${INPUT_FILE}" &
+    PROCESS_PIDS+=($!)
 done
 
-# Wait for all background jobs to complete
-wait
+# Wait for all processing jobs to complete (not Ollama)
+ts "Waiting for ${#PROCESS_PIDS[@]} processing job(s) to complete..."
+set +e  # Temporarily disable exit on error for wait
+for PID in "${PROCESS_PIDS[@]}"; do
+    wait ${PID}
+done
+WAIT_EXIT=$?
+set -e  # Re-enable exit on error
+ts "Wait completed with exit code: ${WAIT_EXIT}"
 
 ts "All files processed"
 
@@ -163,14 +423,54 @@ if [[ -d "${POST_SCAN_DIR}" ]]; then
     export SCAN_DIR="${SCAN_DIR}"
 
     # Timestamp variables
+    export TZ="${TZ:-UTC}"  # Container timezone (e.g., America/Chicago)
     export DATE="$(date +"%Y-%m-%d")"
     export TIME="$(date +"%H:%M:%S")"
     export DATETIME="$(date +"%Y-%m-%dT%H:%M:%S%z")"  # ISO8601 with timezone offset
 
+    # Detection metrics (available when ENABLE_DETECTION=true)
+    export DETECTION_ENABLED="${DETECTION_AVAILABLE}"
+    export PAGES_SCANNED="${TOTAL_PAGES_SCANNED}"
+    export BLANK_PAGES_REMOVED="${TOTAL_BLANKS_REMOVED}"
+    export DOCUMENTS_CREATED="${TOTAL_DOCS_CREATED}"
+    export CLASSIFICATION_ENABLED="${ENABLE_CLASSIFICATION}"
+
+    # Timing metrics
+    PROCESSING_END_TIME=$(date +%s)
+    PROCESSING_DURATION_SECONDS=$((PROCESSING_END_TIME - PROCESSING_START_TIME))
+    PROCESSING_MINUTES=$((PROCESSING_DURATION_SECONDS / 60))
+    PROCESSING_SECS=$((PROCESSING_DURATION_SECONDS % 60))
+    export PROCESSING_DURATION_SECONDS
+    export PROCESSING_DURATION="${PROCESSING_MINUTES}m ${PROCESSING_SECS}s"
+
+    # Calculate per-page timing (use PAGES_SCANNED if detection, otherwise estimate 1 page per file)
+    if [[ "${TOTAL_PAGES_SCANNED}" -gt 0 ]]; then
+        TOTAL_PAGES="${TOTAL_PAGES_SCANNED}"
+    else
+        TOTAL_PAGES="${NUM_FILES}"
+    fi
+    if [[ "${TOTAL_PAGES}" -gt 0 ]]; then
+        SECONDS_PER_PAGE=$(echo "scale=2; ${PROCESSING_DURATION_SECONDS} / ${TOTAL_PAGES}" | bc 2>/dev/null || echo "0")
+    else
+        SECONDS_PER_PAGE="0"
+    fi
+    export SECONDS_PER_PAGE
+
+    ts "Processing complete in ${PROCESSING_DURATION} (${SECONDS_PER_PAGE}s/page)"
+
     for cmd in ${POST_SCAN_DIR}/*; do
         if [[ -x "${cmd}" ]]; then
-            ts "Executing $(basename ${cmd})"
-            echo "${NUM_FILES} files OCRd and uploaded to ${RCLONE_REMOTE}" | ${cmd}
+            CMD_NAME=$(basename ${cmd})
+            ts "Executing ${CMD_NAME}"
+            if [[ "${DETECTION_AVAILABLE}" == "true" ]]; then
+                echo "${NUM_FILES} scans -> ${TOTAL_DOCS_CREATED} documents (${TOTAL_BLANKS_REMOVED} blanks removed) uploaded to ${RCLONE_REMOTE}" | ${cmd} 2>&1 | while IFS= read -r line; do
+                    [[ -n "$line" ]] && echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] post-scan/${CMD_NAME} - $line"
+                done || true
+            else
+                echo "${NUM_FILES} files OCRd and uploaded to ${RCLONE_REMOTE}" | ${cmd} 2>&1 | while IFS= read -r line; do
+                    [[ -n "$line" ]] && echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] post-scan/${CMD_NAME} - $line"
+                done || true
+            fi
         fi
     done
 else
