@@ -19,6 +19,16 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Free up disk space
+        run: |
+          # Remove unnecessary tools to free up ~30GB
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo docker image prune -af
+          df -h
+
       - name: Checkout code
         uses: actions/checkout@v4
 
@@ -45,14 +55,37 @@ jobs:
             type=semver,pattern={{major}}
             type=raw,value=latest,enable={{is_default_branch}}
 
-      - name: Build and push Docker image
+      - name: Build and push full image (amd64 only)
         uses: docker/build-push-action@v5
         with:
           context: .
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Extract metadata for lite image
+        id: meta-lite
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.DOCKER_IMAGE }}
+          tags: |
+            type=raw,value=latest-lite,enable={{is_default_branch}}
+            type=semver,pattern={{version}}-lite
+            type=ref,event=branch,suffix=-lite
+            type=ref,event=pr,suffix=-lite
+
+      - name: Build and push lite image (multi-arch)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          target: lite
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta-lite.outputs.tags }}
+          labels: ${{ steps.meta-lite.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
