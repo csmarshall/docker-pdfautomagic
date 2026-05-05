@@ -27,7 +27,7 @@
 # -----------------------------------------------------------------------------
 # Base stage - shared dependencies for all variants
 # -----------------------------------------------------------------------------
-FROM ubuntu:24.04 AS base
+FROM ubuntu:26.04 AS base
 
 ENV DEBIAN_FRONTEND=noninteractive
 
