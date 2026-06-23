@@ -1,8 +1,8 @@
-# ADR-001: Use Ubuntu 24.04 LTS instead of Alpine Linux for base image
+# ADR-001: Use Ubuntu LTS instead of Alpine Linux for base image
 
 **Status**: Accepted
 
-**Date**: 2025-10-29 (Updated to 24.04 LTS)
+**Date**: 2025-10-29 (Updated to 26.04 LTS on 2026-06-23)
 
 ## Context
 
@@ -18,9 +18,9 @@ Alpine uses musl libc instead of glibc, which can cause compatibility issues wit
 
 ## Decision
 
-Use **Ubuntu 24.04 LTS** as the base image instead of Alpine Linux.
+Use **Ubuntu LTS** (currently **26.04 LTS**) as the base image instead of Alpine Linux.
 
-**Update**: Originally used 22.04 LTS, updated to 24.04 LTS for extended support and newer package versions.
+**Update**: Originally 22.04 LTS → 24.04 LTS → 26.04 LTS, tracking each LTS for extended support and newer package versions. The base image is bumped via Dependabot.
 
 ## Consequences
 
@@ -30,8 +30,8 @@ Use **Ubuntu 24.04 LTS** as the base image instead of Alpine Linux.
 - **Complete language support**: All 10 Tesseract language packs are available and well-maintained in Ubuntu repositories
 - **Easier debugging**: More familiar environment, better documentation, larger community
 - **Python compatibility**: No musl/glibc issues with Pillow, leptonica, or other native libraries
-- **Long-term support**: Ubuntu 24.04 LTS is supported until April 2029 (4+ years remaining)
-- **Modern packages**: Newer versions of OCRmyPDF, Tesseract, and dependencies compared to 22.04
+- **Long-term support**: Ubuntu 26.04 LTS is supported into the mid-2030s
+- **Modern packages**: Newer versions of OCRmyPDF, Tesseract, and dependencies with each LTS
 
 ### Negative
 

@@ -113,6 +113,18 @@ Results in filenames like:
 - `2025-01-12_IRS_Tax_Notice_1234567.pdf`
 - `2025-01-10_Bank_Statement.pdf`
 
+### Detection Reliability (Auto-Disable)
+
+If AI detection fails repeatedly (e.g. the GPU driver drops out or the model
+won't load), PDFAutomagic doesn't get stuck retrying on every scan. After
+`DETECTION_FAILURE_THRESHOLD` consecutive failed runs (default `3`), detection
+**auto-disables** and processing falls back to plain OCR so documents keep
+flowing. It **auto-recovers** the moment a GPU re-check passes, and the warning
+is rate-limited by `DETECTION_BACKOFF_MINUTES` so logs/notifications aren't
+spammed. Post-scan hooks receive `SCAN_STATUS` and `DETECTION_AUTO_DISABLED` so
+you can be notified. To reset manually, delete the state file inside the
+container: `/tmp/pdfautomagic.detection-failures`.
+
 ### Core Features
 
 - **Multi-language OCR** - 10 languages covering 90%+ of global speakers
@@ -141,6 +153,9 @@ Results in filenames like:
 | **AI Detection** | | |
 | `ENABLE_DETECTION` | `true` | Enable AI document detection |
 | `ENABLE_CLASSIFICATION` | `true` | Enable smart document naming |
+| **Detection Reliability** | | |
+| `DETECTION_FAILURE_THRESHOLD` | `3` | Consecutive failed runs before detection auto-disables and falls back to plain OCR (`0` disables this safety net) |
+| `DETECTION_BACKOFF_MINUTES` | `15` | Once auto-disabled, minimum gap between re-logging the warning (avoids spamming a per-minute loop) |
 
 ### Post-Scan Hooks
 
@@ -169,6 +184,12 @@ $BLANK_PAGES_REMOVED  # Blank pages detected and removed
 $DOCUMENTS_CREATED    # Output documents after splitting
 $CLASSIFICATION_ENABLED  # "true" or "false"
 
+# Detection reliability status (for success vs failure notifications)
+$SCAN_STATUS                    # "success", "partial", or "failure"
+$DETECTION_FAILURES             # Detection failures in this run
+$DETECTION_CONSECUTIVE_FAILURES # Running consecutive-failure count
+$DETECTION_AUTO_DISABLED        # "true" when detection is currently auto-disabled
+
 # Timing metrics
 $PROCESSING_DURATION_SECONDS  # Total processing time in seconds
 $PROCESSING_DURATION          # Human readable (e.g., "2m 34s")
@@ -184,7 +205,19 @@ if [[ "${DETECTION_ENABLED}" == "true" ]]; then
 else
   MSG="${FILES_PROCESSED} files processed"
 fi
-curl -X POST "https://ntfy.sh/mytopic" -d "${MSG}"
+
+# React to detection health (Phase 3 reliability)
+PRIORITY="default"
+if [[ "${SCAN_STATUS}" == "failure" ]]; then
+  PRIORITY="high"
+  MSG="⚠️ Detection FAILED (${DETECTION_CONSECUTIVE_FAILURES} in a row). ${MSG}"
+fi
+if [[ "${DETECTION_AUTO_DISABLED}" == "true" ]]; then
+  PRIORITY="high"
+  MSG="${MSG} — AI detection auto-disabled; running plain OCR until the GPU recovers."
+fi
+
+curl -X POST "https://ntfy.sh/mytopic" -H "Priority: ${PRIORITY}" -d "${MSG}"
 ```
 
 ## Building from Source
@@ -236,6 +269,7 @@ See `docs/adr/` for architecture decision records:
 - [ADR-008](docs/adr/008-ollama-local-model-hosting.md) - Ollama for local model hosting (privacy-first)
 - [ADR-009](docs/adr/009-multi-stage-docker-detection-variants.md) - Docker image variants
 - [ADR-010](docs/adr/010-model-bundling-strategy.md) - Model bundling strategy (just works)
+- [ADR-012](docs/adr/012-detection-failure-handling.md) - Detection failure handling (auto-disable & backoff)
 
 ## Troubleshooting
 
