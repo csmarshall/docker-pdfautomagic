@@ -114,7 +114,7 @@ FROM base AS default
 # Version pins for reproducible builds
 # Automatically updated via GitHub Action (.github/workflows/check-ollama-version.yml)
 # Manual check: https://github.com/ollama/ollama/releases
-ARG OLLAMA_VERSION=0.13.5
+ARG OLLAMA_VERSION=0.30.10
 
 # Install Python and dependencies for document detection
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -123,16 +123,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-venv \
     poppler-utils \
     pciutils \
+    zstd \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Ollama (pinned version for reproducibility)
 # Ollama manages GPU detection automatically (NVIDIA, AMD, Apple Silicon)
 # Download architecture-specific binary (amd64 or arm64)
+# Note: Ollama switched its release archives from .tgz to zstd-compressed
+# .tar.zst (requires the zstd package installed above to extract).
 RUN ARCH=$(dpkg --print-architecture) && \
-    curl -fsSL https://github.com/ollama/ollama/releases/download/v${OLLAMA_VERSION}/ollama-linux-${ARCH}.tgz \
-    -o /tmp/ollama.tgz \
-    && tar -xzf /tmp/ollama.tgz -C /usr \
-    && rm /tmp/ollama.tgz \
+    curl -fsSL https://github.com/ollama/ollama/releases/download/v${OLLAMA_VERSION}/ollama-linux-${ARCH}.tar.zst \
+    -o /tmp/ollama.tar.zst \
+    && tar --use-compress-program=unzstd -xf /tmp/ollama.tar.zst -C /usr \
+    && rm /tmp/ollama.tar.zst \
     && ollama --version
 
 # Pre-download the vision AI model (~5GB) so it's baked into the image

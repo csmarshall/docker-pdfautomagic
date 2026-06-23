@@ -15,7 +15,7 @@ This document tracks pinned versions and their update sources.
 
 ### Ollama
 
-| 0.13.5 | `Dockerfile` | [GitHub Releases](https://github.com/ollama/ollama/releases) |
+| 0.30.10 | `Dockerfile` | [GitHub Releases](https://github.com/ollama/ollama/releases) |
 
 The Ollama version is automatically checked weekly by `.github/workflows/check-ollama-version.yml`.
 When a new version is available, a PR is created automatically.
@@ -36,5 +36,6 @@ docker build --build-arg VISION_MODEL=qwen2.5vl:latest -t pdfautomagic:latest .
 
 | Date | Component | Old Version | New Version | Notes |
 |------|-----------|-------------|-------------|-------|
+| 2026-06-22 | Ollama | 0.13.5 | 0.30.10 | Manual catch-up bump (auto-update workflow was blocked) |
 | 2026-01-13 | Ollama | 0.5.4 | 0.13.5 | Update for qwen2.5vl compatibility |
 | 2026-01-12 | Ollama | - | 0.5.4 | Initial detection implementation |
