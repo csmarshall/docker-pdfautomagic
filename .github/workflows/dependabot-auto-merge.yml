@@ -1,0 +1,36 @@
+# Auto-merge low-risk Dependabot PRs once CI passes.
+#
+# Policy: auto-merge patch/minor version bumps and all GitHub Actions bumps.
+# Major version bumps (e.g. the Ubuntu base image) are intentionally held for
+# a human to test before merging.
+#
+# Auto-merge waits for the required `build` status check (branch protection on
+# main), so nothing merges until CI is green. Runs with GITHUB_TOKEN, which can
+# merge PRs that touch workflow files (unlike a user PAT lacking `workflow`).
+
+name: Dependabot auto-merge
+
+on: pull_request_target
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  auto-merge:
+    if: github.actor == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch Dependabot metadata
+        id: meta
+        uses: dependabot/fetch-metadata@v2
+
+      - name: Enable auto-merge (patch/minor + GitHub Actions)
+        if: >-
+          steps.meta.outputs.update-type == 'version-update:semver-patch' ||
+          steps.meta.outputs.update-type == 'version-update:semver-minor' ||
+          steps.meta.outputs.package-ecosystem == 'github_actions'
+        run: gh pr merge --auto --squash "$PR_URL"
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
