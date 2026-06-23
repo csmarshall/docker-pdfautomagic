@@ -93,17 +93,20 @@ cd test && ./run_test.sh
   - e.g., `2026-01-10_Comcast_Bill.pdf` instead of `doc001.pdf`
 - [x] Enabled by default (`ENABLE_CLASSIFICATION=true`)
 
-### Phase 3: Reliability & Notifications (In Progress)
-- [ ] **Success/failure notification hooks**
-  - Separate hooks for success vs failure events
-  - Export detailed status to hook environment variables
-- [ ] **Failure backoff mechanism**
-  - Avoid spamming notifications on repeated failures
-  - Configurable backoff interval
-- [ ] **Auto-disable on repeated failures**
-  - If GPU/model fails N times consecutively, disable detection
-  - Re-enable on next successful GPU check or manual reset
-  - Log prominent warning when auto-disabled
+### Phase 3: Reliability & Notifications ✅ Complete
+- [x] **Success/failure notification hooks**
+  - Post-scan hooks receive `SCAN_STATUS` (success/partial/failure) plus
+    `DETECTION_FAILURES`, `DETECTION_CONSECUTIVE_FAILURES`, and
+    `DETECTION_AUTO_DISABLED` so a single hook can branch on success vs failure
+- [x] **Failure backoff mechanism**
+  - Once auto-disabled, the warning is re-logged at most once per
+    `DETECTION_BACKOFF_MINUTES` (default 15) to avoid spamming a per-minute loop
+- [x] **Auto-disable on repeated failures**
+  - After `DETECTION_FAILURE_THRESHOLD` (default 3) consecutive failed runs,
+    detection is disabled and processing falls back to plain OCR
+  - Auto-recovers on the next successful GPU re-check; manual reset by deleting
+    the state file (`/tmp/pdfautomagic.detection-failures`)
+  - Logs a prominent warning when auto-disabled
 
 ### Phase 4: Future Considerations
 - [ ] Auto-detect grayscale vs color and optimize PDF output size
