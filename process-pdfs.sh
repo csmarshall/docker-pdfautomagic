@@ -19,6 +19,19 @@ DETECTION_SCRIPT="${SCRIPT_DIR}/detection/split_pdf.py"
 DETECTION_VENV="${SCRIPT_DIR}/detection/.venv"
 USING_CPU_FALLBACK="false"  # Set to true if no GPU detected
 
+# Detection reliability (Phase 3): auto-disable after repeated failures + backoff
+# DETECTION_FAILURE_THRESHOLD: number of consecutive failed runs before detection
+#   is auto-disabled and we fall back to plain OCR (0 disables this safety net).
+# DETECTION_BACKOFF_MINUTES: once auto-disabled, minimum gap between re-logging
+#   the warning, so a per-minute scan loop doesn't spam logs/notifications.
+# State files live in /tmp so they persist across runs for the container's
+# lifetime and reset on restart. Delete DETECTION_STATE_FILE to reset manually.
+DETECTION_FAILURE_THRESHOLD="${DETECTION_FAILURE_THRESHOLD:-3}"
+DETECTION_BACKOFF_MINUTES="${DETECTION_BACKOFF_MINUTES:-15}"
+DETECTION_STATE_FILE="${DETECTION_STATE_FILE:-/tmp/pdfautomagic.detection-failures}"
+DETECTION_BACKOFF_FILE="${DETECTION_BACKOFF_FILE:-/tmp/pdfautomagic.detection-backoff}"
+DETECTION_RUN_MARKER=""  # Per-run temp file recording detection outcomes (set below)
+
 # Ollama configuration (runs as process in same container)
 OLLAMA_HOST="${OLLAMA_HOST:-http://localhost:11434}"
 OLLAMA_MODELS="${OLLAMA_MODELS:-/usr/share/ollama/models}"  # Where models are baked in
@@ -91,10 +104,65 @@ stop_ollama() {
     OLLAMA_STARTED_BY_US="false"
 }
 
+# --- Detection failure tracking (Phase 3 reliability) -----------------------
+# The consecutive-failure count persists across runs (state file) so detection
+# can be auto-disabled when the GPU/model is repeatedly failing, then recover.
+
+get_detection_failures() {
+    cat "${DETECTION_STATE_FILE}" 2>/dev/null || echo 0
+}
+
+set_detection_failures() {
+    echo "${1}" > "${DETECTION_STATE_FILE}" 2>/dev/null || true
+}
+
+# Record one detection outcome ("success"|"failure") for the current run.
+# Appends to a per-run marker file so parallel jobs can each record safely
+# (single-byte appends under O_APPEND are atomic).
+record_detection_outcome() {
+    [[ -n "${DETECTION_RUN_MARKER}" ]] || return 0
+    case "${1}" in
+        success) echo "S" >> "${DETECTION_RUN_MARKER}" ;;
+        failure) echo "F" >> "${DETECTION_RUN_MARKER}" ;;
+    esac
+}
+
+# True while within the backoff window since the last auto-disable warning.
+in_detection_backoff() {
+    local last now
+    last=$(cat "${DETECTION_BACKOFF_FILE}" 2>/dev/null || echo 0)
+    now=$(date +%s)
+    [[ $(( now - last )) -lt $(( DETECTION_BACKOFF_MINUTES * 60 )) ]]
+}
+
 # Check if detection is available and configured
 check_detection_available() {
     if [[ "${ENABLE_DETECTION}" != "true" ]]; then
         return 1
+    fi
+
+    # Auto-disable safety net: after several consecutive failed runs, stop
+    # attempting detection and fall back to plain OCR. Re-check the GPU each
+    # run so we auto-recover the moment it comes back.
+    local FAILS
+    FAILS=$(get_detection_failures)
+    if [[ "${DETECTION_FAILURE_THRESHOLD}" -gt 0 ]] && [[ "${FAILS}" -ge "${DETECTION_FAILURE_THRESHOLD}" ]]; then
+        if [[ -x "${DETECTION_VENV}/bin/python" ]] && \
+           "${DETECTION_VENV}/bin/python" "${DETECTION_SCRIPT}" --check-gpu >/dev/null 2>&1; then
+            ts "Detection recovered (GPU check passed) - clearing failure count (was ${FAILS})"
+            set_detection_failures 0
+            rm -f "${DETECTION_BACKOFF_FILE}"
+        else
+            if ! in_detection_backoff; then
+                ts "========================================================================"
+                ts "WARNING: AI detection AUTO-DISABLED after ${FAILS} consecutive failures"
+                ts "         Falling back to standard OCR until the GPU/model recovers."
+                ts "         Manual reset: delete ${DETECTION_STATE_FILE}"
+                ts "========================================================================"
+                date +%s > "${DETECTION_BACKOFF_FILE}" 2>/dev/null || true
+            fi
+            return 1
+        fi
     fi
 
     if [[ ! -f "${DETECTION_SCRIPT}" ]]; then
@@ -161,11 +229,13 @@ detect_and_split_pdf() {
 
         ts "Detection complete: ${PAGES_IN} pages -> ${DOCS} documents (${BLANKS} blanks removed)"
 
+        record_detection_outcome success
         echo "${SPLIT_OUTPUT_DIR}"
         return 0
     else
         ts "ERROR: Detection failed for ${INPUT_FILE}"
         ts "Detection output: ${SPLIT_RESULT}"
+        record_detection_outcome failure
         rm -rf "${SPLIT_OUTPUT_DIR}"
         echo ""
         return 1
@@ -183,6 +253,7 @@ clean_up () {
     EXIT_CODE=${1:-0}
     stop_ollama  # Stop Ollama if we started it on-demand
     cleanup_lock
+    [[ -n "${DETECTION_RUN_MARKER}" ]] && rm -f "${DETECTION_RUN_MARKER}"
     ts "Done"
     exit ${EXIT_CODE}
 }
@@ -360,11 +431,17 @@ else
     fi
 fi
 
+# Per-run marker file recording each detection success/failure (used after the
+# run to update the consecutive-failure counter). Parallel jobs append to it.
+DETECTION_RUN_MARKER="$(mktemp)"
+export DETECTION_RUN_MARKER
+
 # Export function and variables for use in subshells
 export -f process_file
 export -f ocr_file
 export -f ts
 export -f detect_and_split_pdf
+export -f record_detection_outcome
 export -f start_ollama
 export -f stop_ollama
 export OUTPUT_DIR ORIGINALS_DIR SCRIPT DETECTION_AVAILABLE
@@ -401,6 +478,40 @@ ts "Wait completed with exit code: ${WAIT_EXIT}"
 
 ts "All files processed"
 
+# --- Phase 3: tally detection outcomes and update the failure counter -------
+DETECTION_FAILURES_THIS_RUN=0
+DETECTION_SUCCESSES_THIS_RUN=0
+if [[ -f "${DETECTION_RUN_MARKER}" ]]; then
+    # grep -c always prints a count; || true swallows its exit-1-on-zero-matches
+    DETECTION_FAILURES_THIS_RUN=$(grep -c '^F' "${DETECTION_RUN_MARKER}" 2>/dev/null || true)
+    DETECTION_SUCCESSES_THIS_RUN=$(grep -c '^S' "${DETECTION_RUN_MARKER}" 2>/dev/null || true)
+fi
+
+# Reset on any success (detection works); increment only when detection was
+# attempted and every attempt failed (detection appears broken).
+DETECTION_CONSECUTIVE_FAILURES=$(get_detection_failures)
+if [[ "${DETECTION_SUCCESSES_THIS_RUN}" -gt 0 ]]; then
+    if [[ "${DETECTION_CONSECUTIVE_FAILURES}" -ne 0 ]]; then
+        ts "Detection succeeded - resetting consecutive failure count (was ${DETECTION_CONSECUTIVE_FAILURES})"
+    fi
+    set_detection_failures 0
+    rm -f "${DETECTION_BACKOFF_FILE}"
+    DETECTION_CONSECUTIVE_FAILURES=0
+elif [[ "${DETECTION_FAILURES_THIS_RUN}" -gt 0 ]]; then
+    DETECTION_CONSECUTIVE_FAILURES=$(( DETECTION_CONSECUTIVE_FAILURES + 1 ))
+    set_detection_failures "${DETECTION_CONSECUTIVE_FAILURES}"
+    ts "Detection failed this run - consecutive failures: ${DETECTION_CONSECUTIVE_FAILURES}/${DETECTION_FAILURE_THRESHOLD}"
+fi
+
+# Overall status exposed to notification hooks
+if [[ "${DETECTION_FAILURES_THIS_RUN}" -gt 0 ]] && [[ "${DETECTION_SUCCESSES_THIS_RUN}" -eq 0 ]]; then
+    SCAN_STATUS="failure"
+elif [[ "${DETECTION_FAILURES_THIS_RUN}" -gt 0 ]] || [[ "${WAIT_EXIT}" -ne 0 ]]; then
+    SCAN_STATUS="partial"
+else
+    SCAN_STATUS="success"
+fi
+
 RCLONE_REMOTE="${RCLONE_REMOTE:-Dropbox:Cabinet/Documents}"
 ts "Rclone to ${RCLONE_REMOTE}"
 /usr/bin/rclone copy --config /config/rclone.conf -v \
@@ -434,6 +545,18 @@ if [[ -d "${POST_SCAN_DIR}" ]]; then
     export BLANK_PAGES_REMOVED="${TOTAL_BLANKS_REMOVED}"
     export DOCUMENTS_CREATED="${TOTAL_DOCS_CREATED}"
     export CLASSIFICATION_ENABLED="${ENABLE_CLASSIFICATION}"
+
+    # Detection reliability status (Phase 3) - lets hooks notify on success vs
+    # failure. SCAN_STATUS is one of: success | partial | failure.
+    export SCAN_STATUS="${SCAN_STATUS:-success}"
+    export DETECTION_FAILURES="${DETECTION_FAILURES_THIS_RUN:-0}"
+    export DETECTION_CONSECUTIVE_FAILURES="${DETECTION_CONSECUTIVE_FAILURES:-0}"
+    if [[ "${DETECTION_FAILURE_THRESHOLD}" -gt 0 ]] && \
+       [[ "${DETECTION_CONSECUTIVE_FAILURES:-0}" -ge "${DETECTION_FAILURE_THRESHOLD}" ]]; then
+        export DETECTION_AUTO_DISABLED="true"
+    else
+        export DETECTION_AUTO_DISABLED="false"
+    fi
 
     # Timing metrics
     PROCESSING_END_TIME=$(date +%s)
