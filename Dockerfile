@@ -114,7 +114,7 @@ FROM base AS default
 # Version pins for reproducible builds
 # Automatically updated via GitHub Action (.github/workflows/check-ollama-version.yml)
 # Manual check: https://github.com/ollama/ollama/releases
-ARG OLLAMA_VERSION=0.30.10
+ARG OLLAMA_VERSION=0.30.11
 
 # Install Python and dependencies for document detection
 RUN apt-get update && apt-get install -y --no-install-recommends \
