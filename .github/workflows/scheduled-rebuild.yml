@@ -156,7 +156,7 @@ jobs:
       - name: Extract metadata for Docker
         if: steps.compare.outputs.needs_rebuild == 'true'
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ env.DOCKER_IMAGE }}
           tags: |
