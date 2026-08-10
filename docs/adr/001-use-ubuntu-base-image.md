@@ -18,9 +18,11 @@ Alpine uses musl libc instead of glibc, which can cause compatibility issues wit
 
 ## Decision
 
-Use **Ubuntu LTS** (currently **26.04 LTS**) as the base image instead of Alpine Linux.
+Use the **current Ubuntu LTS** as the base image instead of Alpine Linux.
 
-**Update**: Originally 22.04 LTS → 24.04 LTS → 26.04 LTS, tracking each LTS for extended support and newer package versions. The base image is bumped via Dependabot.
+The Dockerfile pins an explicit LTS tag rather than `:latest`, and that pin is the single source of truth for which release is actually in use — this ADR deliberately does not name a version. The pin matters because the weekly scheduled rebuild pushes straight to Docker Hub, so `:latest` would let the base silently jump an LTS with no PR and no test. Dependabot proposes each bump as a reviewable PR instead.
+
+**Update**: Originally 22.04 LTS → 24.04 LTS → 26.04 LTS, tracking each LTS for extended support and newer package versions.
 
 ## Consequences
 
@@ -30,7 +32,7 @@ Use **Ubuntu LTS** (currently **26.04 LTS**) as the base image instead of Alpine
 - **Complete language support**: All 10 Tesseract language packs are available and well-maintained in Ubuntu repositories
 - **Easier debugging**: More familiar environment, better documentation, larger community
 - **Python compatibility**: No musl/glibc issues with Pillow, leptonica, or other native libraries
-- **Long-term support**: Ubuntu 26.04 LTS is supported into the mid-2030s
+- **Long-term support**: each Ubuntu LTS carries 5 years of standard security support, so tracking LTS releases keeps the base supported without chasing interim releases
 - **Modern packages**: Newer versions of OCRmyPDF, Tesseract, and dependencies with each LTS
 
 ### Negative
