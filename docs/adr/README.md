@@ -36,6 +36,9 @@ Each ADR follows this format:
 ### OCR Processing
 - [ADR-011](011-force-ocr-over-existing.md) - Force OCR over existing text (consistent quality)
 
+### Reliability
+- [ADR-012](012-detection-failure-handling.md) - Detection failure handling: auto-disable, backoff, and status hooks
+
 ## Creating a New ADR
 
 1. Copy the template below

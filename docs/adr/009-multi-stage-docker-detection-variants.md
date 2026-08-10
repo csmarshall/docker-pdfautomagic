@@ -64,8 +64,11 @@ The vision model is baked into the image as a separate Docker layer for efficien
 
 ### Dockerfile Structure
 
+Illustrative — exact version pins live in the [`Dockerfile`](../../Dockerfile)
+(base image via Dependabot, `OLLAMA_VERSION` via the weekly check workflow).
+
 ```dockerfile
-FROM ubuntu:24.04 AS base
+FROM ubuntu:26.04 AS base
 # Install ocrmypdf, tesseract, rclone, etc.
 
 # Lite variant - OCR only
@@ -75,9 +78,10 @@ COPY process-pdfs.sh entrypoint.sh /app/
 
 # Default variant - Full featured (last stage = default)
 FROM base AS default
-ARG OLLAMA_VERSION=0.5.4
-RUN apt-get install -y python3 python3-venv poppler-utils
-RUN curl ... ollama-linux-amd64.tgz | tar -xz -C /usr
+ARG OLLAMA_VERSION=0.30.10
+RUN apt-get install -y python3 python3-venv poppler-utils zstd
+# Ollama ships zstd-compressed .tar.zst archives (see ADR-008 / Dockerfile)
+RUN curl ... ollama-linux-amd64.tar.zst | tar --use-compress-program=unzstd -x -C /usr
 
 # Pre-download model (~5GB layer, cached separately)
 ARG VISION_MODEL=qwen2.5vl:7b
