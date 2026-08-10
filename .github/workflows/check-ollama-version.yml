@@ -1,7 +1,20 @@
-# Check for new Ollama releases and create PR if update available
+# Check for new Ollama releases and open/update a PR when one is available.
 #
 # Runs on: push to main, weekly schedule, and manual trigger.
-# Creates a PR to update OLLAMA_VERSION in Dockerfile if a new version is found.
+#
+# The update PR always uses the SAME branch (deps/ollama-update), so each run
+# updates the existing PR in place rather than opening another one. Earlier
+# versions of this workflow used a per-version branch, which opened a new PR
+# every week; seven accumulated between June and August 2026 and none of them
+# could merge.
+#
+# TOKEN: create-pull-request uses OLLAMA_PR_TOKEN (a repo-scoped PAT) when it is
+# available. This is not cosmetic. A PR opened with the default GITHUB_TOKEN does
+# not start the `build` workflow — its run is parked in `action_required` with no
+# jobs — and because branch protection requires `build`, the PR can never merge.
+# A PAT-authored PR triggers CI normally. Without the secret the workflow still
+# opens the PR, but that PR will be unmergeable until someone approves its run
+# by hand.
 
 name: Check Ollama Version
 
@@ -28,26 +41,50 @@ jobs:
         id: current
         run: |
           CURRENT_VERSION=$(grep -oP 'ARG OLLAMA_VERSION=\K[0-9.]+' Dockerfile)
-          echo "version=${CURRENT_VERSION}" >> $GITHUB_OUTPUT
+          if [ -z "${CURRENT_VERSION}" ]; then
+            echo "::error::Could not read ARG OLLAMA_VERSION from Dockerfile"
+            exit 1
+          fi
+          echo "version=${CURRENT_VERSION}" >> "$GITHUB_OUTPUT"
           echo "Current version: ${CURRENT_VERSION}"
 
       - name: Get latest Ollama release
         id: latest
         run: |
-          LATEST_VERSION=$(curl -s https://api.github.com/repos/ollama/ollama/releases/latest | jq -r '.tag_name' | sed 's/^v//')
-          echo "version=${LATEST_VERSION}" >> $GITHUB_OUTPUT
+          LATEST_VERSION=$(curl -fsS https://api.github.com/repos/ollama/ollama/releases/latest | jq -r '.tag_name' | sed 's/^v//')
+          # A failed API call must not be mistaken for "no update available".
+          if [ -z "${LATEST_VERSION}" ] || [ "${LATEST_VERSION}" = "null" ]; then
+            echo "::error::Could not determine the latest Ollama release"
+            exit 1
+          fi
+          echo "version=${LATEST_VERSION}" >> "$GITHUB_OUTPUT"
           echo "Latest version: ${LATEST_VERSION}"
 
       - name: Compare versions
         id: compare
         run: |
           if [ "${{ steps.current.outputs.version }}" != "${{ steps.latest.outputs.version }}" ]; then
-            echo "update_needed=true" >> $GITHUB_OUTPUT
+            echo "update_needed=true" >> "$GITHUB_OUTPUT"
             echo "Update needed: ${{ steps.current.outputs.version }} -> ${{ steps.latest.outputs.version }}"
           else
-            echo "update_needed=false" >> $GITHUB_OUTPUT
+            echo "update_needed=false" >> "$GITHUB_OUTPUT"
             echo "Already up to date"
           fi
+
+      - name: Verify the release asset actually exists
+        if: steps.compare.outputs.update_needed == 'true'
+        run: |
+          # The 0.30.10 bump broke the build because upstream changed release
+          # packaging from .tgz to .tar.zst. Fail here, loudly, rather than
+          # opening a PR whose build fails for a reason nobody reads.
+          URL="https://github.com/ollama/ollama/releases/download/v${{ steps.latest.outputs.version }}/ollama-linux-amd64.tar.zst"
+          CODE=$(curl -sIL -o /dev/null -w '%{http_code}' "${URL}")
+          if [ "${CODE}" != "200" ]; then
+            echo "::error::Expected release asset is missing (HTTP ${CODE}): ${URL}"
+            echo "::error::Upstream may have changed its packaging again — the Dockerfile needs a look."
+            exit 1
+          fi
+          echo "Release asset present: ${URL}"
 
       - name: Update Dockerfile
         if: steps.compare.outputs.update_needed == 'true'
@@ -57,20 +94,96 @@ jobs:
 
       - name: Update VERSIONS.md
         if: steps.compare.outputs.update_needed == 'true'
+        env:
+          CURRENT: ${{ steps.current.outputs.version }}
+          LATEST: ${{ steps.latest.outputs.version }}
         run: |
-          # Update the current version in the table
-          sed -i "s/| ${{ steps.current.outputs.version }} |/| ${{ steps.latest.outputs.version }} |/" VERSIONS.md
-
-          # Add entry to version history
           DATE=$(date +%Y-%m-%d)
-          sed -i "/^| Date /a | ${DATE} | Ollama | ${{ steps.current.outputs.version }} | ${{ steps.latest.outputs.version }} | Automated update |" VERSIONS.md
+          ROW="| ${DATE} | Ollama | ${CURRENT} | ${LATEST} | Automated update |"
+
+          # Anchored at line start and guarded by the Location cell so this can
+          # only match the Current Versions row. The previous unanchored pattern
+          # also matched history rows, rewriting the record of what shipped on an
+          # earlier date.
+          sed -i -E "s@^\| ${CURRENT} \| \`Dockerfile\` \|@| ${LATEST} | \`Dockerfile\` |@" VERSIONS.md
+
+          # Insert after the header's separator line. The previous version used
+          # `sed "/^| Date /a"`, which put the new row between the header and the
+          # separator and broke the table.
+          awk -v row="${ROW}" '
+              /^\| Date \| Component \| Old Version \| New Version \| Notes \|/ {
+                  print; if ((getline sep) > 0) { print sep; print row; next }
+              }
+              { print }
+          ' VERSIONS.md > VERSIONS.md.tmp && mv VERSIONS.md.tmp VERSIONS.md
           echo "Updated VERSIONS.md"
+
+      - name: Verify the edits are correct
+        if: steps.compare.outputs.update_needed == 'true'
+        env:
+          CURRENT: ${{ steps.current.outputs.version }}
+          LATEST: ${{ steps.latest.outputs.version }}
+        run: |
+          # A check that cannot fail is worthless, so assert the specific damage
+          # the old implementation used to do rather than just grepping for the
+          # new version somewhere in the file.
+          fail=0
+
+          if ! grep -qE "^ARG OLLAMA_VERSION=${LATEST}$" Dockerfile; then
+            echo "::error::Dockerfile does not pin ${LATEST}"; fail=1
+          fi
+
+          hdr=$(grep -n '^| Date | Component | Old Version | New Version | Notes |' VERSIONS.md | cut -d: -f1)
+          if [ -z "${hdr}" ]; then
+            echo "::error::Version History header not found in VERSIONS.md"; fail=1
+          else
+            sep_line=$(sed -n "$((hdr + 1))p" VERSIONS.md)
+            case "${sep_line}" in
+              \|---*) : ;;
+              *) echo "::error::Row inserted between the history header and its separator"; fail=1 ;;
+            esac
+          fi
+
+          # Every history row must still describe its own upgrade. If the count of
+          # rows naming ${LATEST} as the new version exceeds one, an older row was
+          # rewritten.
+          n=$(grep -c "| ${LATEST} | Automated update |" VERSIONS.md || true)
+          if [ "${n}" -ne 1 ]; then
+            echo "::error::Expected exactly 1 new history row, found ${n} — an existing row was likely rewritten"; fail=1
+          fi
+
+          if [ "${fail}" -ne 0 ]; then
+            echo "--- VERSIONS.md Version History ---"
+            sed -n '/## Version History/,$p' VERSIONS.md
+            exit 1
+          fi
+          echo "VERSIONS.md edits verified"
+
+      # The `secrets` context is not available in a step-level `if`, so the
+      # presence of the PAT has to be turned into a step output first.
+      - name: Detect PR token
+        id: pat
+        env:
+          PAT: ${{ secrets.OLLAMA_PR_TOKEN }}
+        run: |
+          if [ -n "${PAT}" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Warn when no PAT is configured
+        if: steps.compare.outputs.update_needed == 'true' && steps.pat.outputs.present == 'false'
+        run: |
+          echo "::warning::OLLAMA_PR_TOKEN is not set, so this PR is authored by GITHUB_TOKEN."
+          echo "::warning::Its 'build' check will not run, and branch protection will block the merge."
+          echo "::warning::Add a repo-scoped PAT as the OLLAMA_PR_TOKEN secret to fix this."
 
       - name: Create Pull Request
         if: steps.compare.outputs.update_needed == 'true'
         uses: peter-evans/create-pull-request@v8
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.OLLAMA_PR_TOKEN || secrets.GITHUB_TOKEN }}
           commit-message: "deps(ollama): update to v${{ steps.latest.outputs.version }}"
           title: "deps(ollama): update Ollama to v${{ steps.latest.outputs.version }}"
           body: |
@@ -80,14 +193,18 @@ jobs:
 
             **Release notes:** https://github.com/ollama/ollama/releases/tag/v${{ steps.latest.outputs.version }}
 
+            The presence of the `ollama-linux-amd64.tar.zst` release asset was verified before this PR was opened.
+
             ### Testing
-            - [ ] Build the image: `docker build -t pdfautomagic:test .`
-            - [ ] Test splitting functionality
+            - [ ] CI `build` is green
+            - [ ] GPU smoke test on the built image (detection still works with the vision model)
             - [ ] Verify Ollama version: `docker run --rm pdfautomagic:test ollama --version`
 
+            > Merging to `main` publishes `:latest` to Docker Hub, which deployments then pull. Worth a smoke test first.
+
             ---
-            *This PR was automatically created by the [check-ollama-version](.github/workflows/check-ollama-version.yml) workflow.*
-          branch: deps/ollama-${{ steps.latest.outputs.version }}
+            *Opened by the [check-ollama-version](.github/workflows/check-ollama-version.yml) workflow. This PR is updated in place as newer Ollama releases appear.*
+          branch: deps/ollama-update
           labels: |
             dependencies
             ollama
