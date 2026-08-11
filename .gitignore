@@ -45,3 +45,6 @@ detection/test/output/
 detection/test/input/*.pdf
 detection/test_output/
 detection/*.pdf
+
+# Rollback state written by update-deployment.sh into the compose directory
+.update-deployment.previous-image
